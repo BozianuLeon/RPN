@@ -51,7 +51,7 @@ class CustomCOCODataset(Dataset):
         labels = torch.ones((n_objs,),dtype=torch.int64)
         img_id = torch.tensor([img_id])
 
-        img_tensor, scaled_boxes = self.prepare_image(img_tensor,boxes)
+        img_tensor, scaled_boxes = self.prepare_image(img,boxes) # ensure all images are same size, and boxes still on objects
 
         my_annotations = {}
         my_annotations["image_id"] = img_id
@@ -62,7 +62,23 @@ class CustomCOCODataset(Dataset):
 
         return img_tensor, my_annotations
 
+    def __len__(self):
+        return len(self.ids)
+    
+    def prepare_image(self,
+                      img,
+                      boxes,
+                      size
+    ):
 
+        scaled_boxes = boxes
+        scaled_boxes[:,[0,2]] = (size*(boxes[:,[0,2]]/img.size[0]))
+        scaled_boxes[:,[1,3]] = (size*(boxes[:,[1,3]]/img.size[1]))
+
+        resize_tens = transforms.Compose([transforms.Resize([size,size]),
+                                       transforms.ToTensor()])
+        scaled_img = resize_tens(img)
+        return scaled_img, scaled_boxes
 
 
 
