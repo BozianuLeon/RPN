@@ -70,6 +70,7 @@ class CustomCOCODataset(Dataset):
                       boxes,
                       size
     ):
+        #resizes and turns image to tensor, ensures boxes still lie on objects
 
         scaled_boxes = boxes
         scaled_boxes[:,[0,2]] = (size*(boxes[:,[0,2]]/img.size[0]))
@@ -80,6 +81,21 @@ class CustomCOCODataset(Dataset):
         scaled_img = resize_tens(img)
         return scaled_img, scaled_boxes
 
+    def check_channel(self,
+                      img_id
+    ):
+        #checks that we have an RGB image
+        img_path = self.coco.loadImgs([img_id])[0]["file_name"]
+        im = Image.open(os.path.join(self.root, img_path))
+        if len(im.mode)==1:
+            im.close()
+            return False
+        elif len(im.mode)==3:
+            im.close()
+            return True
+        else:
+            im.close()
+            return -1
 
 
 
