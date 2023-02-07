@@ -9,6 +9,9 @@ from PIL import Image
 
 
 class CustomCOCODataset(Dataset):
+    '''
+    Preparing COCO images à la h-huang-github.io/tutorials/intermediate/torchvision_tutorial.html
+    '''
     def __init__(self,
                  root_folder,
                  annotation_json
@@ -119,7 +122,7 @@ class CustomCOCODataLoader(DataLoader):
     def custom_collate_fn(self,
                           batch
     ):
-    
+
     # Function to correctly stack images/annotations inside the batch
     # Output: 
     # images: (batch_size, 3, 256, 256)
@@ -152,7 +155,7 @@ class CustomCOCODataLoader(DataLoader):
     
     
     def loader(self):
-        return DataLoader(self.dataset,
+        return DataLoader(dataset=self.dataset,
                           batch_size=self.batch_size,
                           shuffle=self.shuffle,
                           num_workers=self.num_workers,

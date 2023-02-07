@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torchvision.ops import boxes as box_ops, Conv2dNormActivation, box_iou
-from torchvision.models.detection._utils import Matcher, BoxCoder
+from torchvision.models.detection._utils import Matcher, BoxCoder, BalancedPositiveNegativeSampler
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 
 
@@ -25,7 +25,7 @@ class SimpleRPN(nn.module):
         Input: [3,256,256]
         Output: [1,anchor_grid_size,anchor_grid_size], [4,anchor_grid_size,anchor_grid_size]
         '''
-        
+
         convs_list = []
         for _ in range(conv_depth):
             convs_list.append(Conv2dNormActivation(in_channels,in_channels,kernel_size=3,norm_layer=torch.nn.BatchNorm2d))
@@ -46,6 +46,78 @@ class SimpleRPN(nn.module):
 
 
 
+
+
+class RPNStructure(nn.Module):
+    '''
+    Contains the functions and logic needed to run the RPN. The forward call does the heavy lifting
+    here. Follows the torchvision documentation closely, but does not use anchors per level.
+    Args:
+        anchor_generator: torchvision native module
+        model: the convolutional neural network 
+        fg_iou_thresh: IOU score necessary to become a positive anchor example (FG) in training
+        bg_iou_thresh: IOU score below which anchor is considered negative (BG) in training
+        batch_size_per_image: numb of anchors used in the compute loss function
+        pos_fraction: proportion of anchors in compute loss that should be positive
+        pre_nms_top_n: number of top-scoring proposals we keep before NMS
+        nms_thresh: threshold used in NMS [0,1]
+        post_nms_top_n: number of top-scoring proposals we keep after NMS
+
+    Returns:
+        Boxes, objectness_scores, losses
+    '''
+
+    def __init__(
+        self,
+        model,
+        #training arguments
+        fg_iou_threshold,
+        bg_iou_threshold,
+        batch_size_per_image,
+        positive_fraction,
+        #inference arguments
+        pre_nms_top_n,
+        nms_threshold,
+        post_nms_top_n,
+        score_threshold
+    ):
+        super().__init__()
+        self.head = model
+        self.anchor_generator = AnchorGenerator
+        self.box_coding = BoxCoder(weights=(1.,1.,1.,1.))
+        
+        #training
+        self.box_similarity = box_iou
+        self.proposal_matcher = Matcher(
+            fg_iou_threshold,
+            bg_iou_threshold,
+            allow_low_quality_matches=True
+        )
+        self.fg_bg_sampler = BalancedPositiveNegativeSampler(batch_size_per_image, positive_fraction)
+
+        #inference
+        self._pre_nms_top_n = pre_nms_top_n #for now just one topN for both train+test
+        self.nms_thresh = nms_threshold
+        self._post_nms_top_n = post_nms_top_n #for now just one topN for both train+test
+        self.score_thresh = score_threshold
+        self.min_size = 1e-3
+
+
+
+
+    #....
+
+    def foward(
+        self,
+        batch_of_images,
+        batch_of_anns,
+    ):
+        
+        objectness, pred_bbox_deltas = self.head(batch_of_images)
+        anchors = self.anchor_generator()
+
+
+        return
 
 
 
