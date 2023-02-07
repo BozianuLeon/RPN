@@ -25,6 +25,7 @@ class SimpleRPN(nn.module):
         Input: [3,256,256]
         Output: [1,anchor_grid_size,anchor_grid_size], [4,anchor_grid_size,anchor_grid_size]
         '''
+        
         convs_list = []
         for _ in range(conv_depth):
             convs_list.append(Conv2dNormActivation(in_channels,in_channels,kernel_size=3,norm_layer=torch.nn.BatchNorm2d))
