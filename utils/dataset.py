@@ -22,6 +22,7 @@ class CustomCOCODataset(Dataset):
         id_list_3 = [i for i in id_list_uniq if self.check_channels(i)] #only include color images
         self.ids = id_list_3
 
+
     def __getitem__(self, 
                     index
     ):
@@ -36,6 +37,7 @@ class CustomCOCODataset(Dataset):
         # Bounding boxes for all objects in image
         # In coco format bbox = [xmin,ymin,width,height]
         # In pytorch, bbox = [xmin,ymin,xmax,ymax]
+        # TODO: No need for the for loop
         boxes = []
         iscrowd = []
         for i in range(n_objs):
@@ -62,9 +64,11 @@ class CustomCOCODataset(Dataset):
 
         return img_tensor, my_annotations
 
+
     def __len__(self):
         return len(self.ids)
     
+
     def prepare_image(self,
                       img,
                       boxes,
@@ -81,7 +85,8 @@ class CustomCOCODataset(Dataset):
         scaled_img = resize_tens(img)
         return scaled_img, scaled_boxes
 
-    def check_channel(self,
+
+    def check_channels(self,
                       img_id
     ):
         #checks that we have an RGB image
@@ -96,6 +101,56 @@ class CustomCOCODataset(Dataset):
         else:
             im.close()
             return -1
+
+
+class CustomCOCODataLoader(DataLoader):
+    def __init__(self,
+                 dataset,
+                 batch_size,
+                 shuffle,
+                 num_workers
+    ):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.num_workers = num_workers
+
+    
+    def custom_collate_fn(self,
+                          batch
+    ):
+    # Function to correctly stack images/annotations inside the batch
+    # Output: 
+    # images: (batch_size, 3, 256, 256)
+    # boxes: (batch_size, n_obj, 4)
+    # labels: (batch_size, n_obj)
+    # index: (batch_size)
+    # path: (batch_size)
+
+        img_tensor_list = []
+        scaled_boxes_list = []
+        labels_list = []
+        index_list = []
+        path_list = []
+
+        for img_tensor, my_anns in batch:
+            img_tensor_list.append(img_tensor)
+            scaled_boxes_list.append(my_anns["boxes"])
+            labels_list.append(my_anns["labels"])
+            index_list.append(my_anns["image_id"])
+            path_list.append(my_anns["path"])
+        
+        batch_images = torch.stack(img_tensor_list,dim=0)
+
+        batch_anns = dict(bboxes = scaled_boxes_list,
+                          labels = labels_list,
+                          image_index = index_list,
+                          image_paths = path_list,)
+
+        return batch_images, batch_anns
+
+
+
 
 
 
