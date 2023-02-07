@@ -119,6 +119,7 @@ class CustomCOCODataLoader(DataLoader):
     def custom_collate_fn(self,
                           batch
     ):
+    
     # Function to correctly stack images/annotations inside the batch
     # Output: 
     # images: (batch_size, 3, 256, 256)
@@ -148,6 +149,15 @@ class CustomCOCODataLoader(DataLoader):
                           image_paths = path_list,)
 
         return batch_images, batch_anns
+    
+    
+    def loader(self):
+        return DataLoader(self.dataset,
+                          batch_size=self.batch_size,
+                          shuffle=self.shuffle,
+                          num_workers=self.num_workers,
+                          collate_fn=self.custom_collate_fn)
+
 
 
 
