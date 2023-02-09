@@ -112,12 +112,50 @@ class RPNStructure(nn.Module):
         batch_of_images,
         batch_of_anns,
     ):
+        '''
+        Full pass of the RPN algorithm. 1. Compute feature maps, 2. Get model predictions, 
+        3. Generate anchors, 4. Re-shape model outputs 5. decode model outputs -> proposals,
+        6. Filter proposals, 7. (If training) Assign targets to anchors, 
+        8. (If training) Compute loss, 9. Combine losses? back propagate? optimiser step?
+
+        Args:
+            batch_of_images (ImageList): images, as tensors, we want to compute predictions for
+            batch_of_anns (List[Dict[str,tensor]]): ground-truth boxes, labels, optional
         
-        objectness, pred_bbox_deltas = self.head(batch_of_images)
-        anchors = self.anchor_generator()
+        Returns:
+            boxes (List[Tensor]): the predicted boxes from the RPN, one tensor per image
+            scores (List[Tensor]): the scores associated to each of the proposal boxes
+            losses (Dict[str,Tensor]): the losses from the model in training (empty in test)
 
+        '''
 
-        return
+        feature_maps = self.shared_network(batch_of_images)
+        
+        objectness, pred_bbox_deltas = self.head(feature_maps)
+        anchors = self.anchor_generator(batch_of_images,feature_maps)
+
+        num_images_in_batch = len(anchors)
+        num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness]
+        num_anchors_per_level = [s[0]*s[1]*s[2] for s in num_anchors_per_level_shape_tensors]
+
+        objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
+        proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
+        proposals = proposals.view(num_images_in_batch, -1, 4)
+        final_boxes, final_scores = self.filter_proposals(proposals, objectness, batch_of_images, num_anchors_per_level)
+
+        losses = {}
+        if self.training:
+            print("Trainning RPN ...")
+            if batch_of_anns is None:
+                raise ValueError("Targets should not be none in training")
+
+            targets = batch_of_anns[] #how are we inputting truth
+            labels, matched_gt_boxes = self.assign_targets_to_anchors(anchors,targets)
+            regression_targets = self.box_coding.encode(matched_gt_boxes, anchors)
+            loss_clf, loss_reg = self.compute_loss(objectness, pred_bbox_deltas, labels, regression_targets)
+            losses = {"loss_clf": loss_clf, "loss_reg": loss_reg}
+
+        return final_boxes, final_scores, losses
 
 
 
