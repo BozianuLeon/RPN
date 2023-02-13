@@ -230,7 +230,41 @@ class RPNStructure(nn.Module):
         return final_boxes, final_scores
 
 
+    def assign_targets_to_anchors(
+        self,
+        anchors,
+        targets,
+    ):
+        '''
+        Takes a list of anchors and GT boxes and returns the anchor assignment tensor
+        POS:1, NEG:0, NEUTRAL:-1
+        and for each anchor the GT box it matches to (if any)
+        '''
 
+        labels = []
+        matched_gt_boxes = []
+        for anchor_per_image, target_per_image in zip(anchors, targets):
+
+            gt_boxes = target_per_image['boxes']
+            matched_quality_matrix = self.box_similarity(gt_boxes, anchor_per_image)
+            matched_idx = self.proposal_matcher(matched_quality_matrix)
+            #clamp because some indices may have -ve values
+            matched_gt_boxes_per_img = gt_boxes[matched_idx.clamp(min=0)]
+
+            labels_per_image = matched_idx >= 0
+            labels_per_image = labels_per_image.to(dtype=torch.float32)
+
+            bg_idx = matched_idx == self.proposal_matcher.BELOW_LOW_THRESHOLD
+            labels_per_image[bg_idx] = 0.0
+
+            #discard indices between threshholds
+            idx_discard = matched_idx == self.proposal_matcher.BETWEEN_THRESHOLDS
+            labels_per_image[idx_discard] = -1.0
+
+            labels.append(labels_per_image)
+            matched_gt_boxes.append(matched_gt_boxes_per_img)
+
+        return matched_gt_boxes, labels
 
 
     #....
