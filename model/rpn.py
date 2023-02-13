@@ -148,9 +148,10 @@ class RPNStructure(nn.Module):
             flattened_box_cls.append(self.permute_and_reshape(cls_per_level, B, C, W, H))
             flattened_box_reg.append(self.permute_and_reshape(bbx_reg_per_level, B, 4, W, H)) 
         
-        box_cls = torch.cat(flattened_box_cls, dim=1).flatten(0, -2)
+        box_cls = torch.cat(flattened_box_cls, dim=1).flatten(start_dim=0, end_dim=-2)
         box_reg = torch.cat(flattened_box_reg, dim=1).reshape(-1, 4)
         return box_cls, box_reg
+
 
     def _get_top_n_idx(
         self,
@@ -169,6 +170,64 @@ class RPNStructure(nn.Module):
             top_n_idx.append(anchor_idx + anchor_idx_offset)
             anchor_idx_offset += anchors_in_level
         return torch.cat(top_n_idx, dim=1)  
+
+
+    def filter_proposals(
+        self,
+        proposals,
+        objectness,
+        num_anchors_per_level,
+        image_sizes
+    ):
+        '''
+        Import function, tajes decoded Pred_bbox_deltas (called proposals) and their objectness and perform
+        selections before and after applying non-maximal suppression to the list of proposals
+        Returns on batch level
+
+        Args:
+            proposals (Tensor): List of proposals boxes -decoded!
+            objectness (Tensor): List of objectness scores from model cls
+            num_anchors_per_level (List[int])
+            image_sizes (List[Tuple[int,int]])
+
+        '''
+        num_images_in_batch = proposals.shape[0]
+        objectness.detach() #dont backprop here
+        objectness.reshape(num_images_in_batch,-1)
+
+        #give anchors in each level an index referring to the level they belong to (should be 1 for us)
+        levels = [torch.full((anchors_in_level,), idx, dtype=torch.int64) for idx, anchors_in_level in enumerate(num_anchors_per_level)]
+        levels = torch.cat(levels,dim=0)
+        levels = levels.reshape(1,-1).expand_as(objectness)
+
+        top_n_idx = self._get_top_n_idx(objectness, num_anchors_per_level) #pre_nms_top_n happens within
+        batch_images = torch.arange(0,num_images_in_batch)
+        batch_idx = batch_images[:,None]
+
+        objectness = objectness[batch_idx, top_n_idx]
+        proposals = proposals[batch_idx, top_n_idx]
+        levels = levels[batch_idx, top_n_idx]
+
+        final_boxes = []
+        final_scores = []
+        for boxes, scores, level, image_shape in zip(proposals, objectness, levels, image_sizes):
+            boxes = box_ops.clip_boxes_to_image(boxes, image_shape)
+
+            keep = box_ops.remove_small_boxes(boxes, self.min_box_size)
+            boxes, scores, level = boxes[keep], scores[keep], level[keep]
+
+            keep = torch.where(scores >= self.score_threshold)[0]
+            boxes, scores, level = boxes[keep], scores[keep], level[keep]
+
+            keep = box_ops.batched_nms(boxes, scores, level, self.nms_theshold)
+            keep = keep[:self.post_nms_top_n]
+
+            boxes, scores = boxes[keep], scores[keep]
+
+            final_boxes.append(boxes)
+            final_scores.append(scores)
+
+        return final_boxes, final_scores
 
 
 
@@ -216,7 +275,7 @@ class RPNStructure(nn.Module):
         objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
         proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
         proposals = proposals.view(num_images_in_batch, -1, 4)
-        final_boxes, final_scores = self.filter_proposals(proposals, objectness, batch_of_images, num_anchors_per_level)
+        final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, batch_of_images.image_sizes)
 
         losses = {}
         if self.training:
