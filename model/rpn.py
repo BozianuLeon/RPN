@@ -140,7 +140,7 @@ class RPNStructure(nn.Module):
         '''
         flattened_box_cls = []
         flattened_box_reg = []
-        for cls_per_level, bbx_reg_per_level in zip(objectness, bbx_regs):
+        for cls_per_level, bbx_reg_per_level in zip(objectness, pred_bbox_deltas):
             B, Axc, H, W = cls_per_level.shape
             _, Ax4, _, _ = bbx_reg_per_level.shape
             A = Ax4 // 4
@@ -151,6 +151,25 @@ class RPNStructure(nn.Module):
         box_cls = torch.cat(flattened_box_cls, dim=1).flatten(0, -2)
         box_reg = torch.cat(flattened_box_reg, dim=1).reshape(-1, 4)
         return box_cls, box_reg
+
+    def _get_top_n_idx(
+        self,
+        objectness,
+        num_anchors_per_level,
+    ): 
+        # function that will always return the indexes of the boxes most likely to have objects in
+        # account for case where there are n > anchors in pre_nms_top_n
+        # and when there are numerous anchors per level (in multiple levels)
+        top_n_idx = []
+        anchor_idx_offset = 0
+        for o in  objectness.split(num_anchors_per_level, dim=1):
+            anchors_in_level = o.shape[1]
+            pre_nms_top_n = min(self.pre_nms_top_n(), anchors_in_level)
+            _, anchor_idx = o.topk(pre_nms_top_n, dim=1)
+            top_n_idx.append(anchor_idx + anchor_idx_offset)
+            anchor_idx_offset += anchors_in_level
+        return torch.cat(top_n_idx, dim=1)  
+
 
 
 
