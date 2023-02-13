@@ -70,6 +70,7 @@ class RPNStructure(nn.Module):
     def __init__(
         self,
         model,
+        shared_layers,
         #training arguments
         fg_iou_threshold,
         bg_iou_threshold,
@@ -83,6 +84,7 @@ class RPNStructure(nn.Module):
     ):
         super().__init__()
         self.head = model
+        self.shared_network = shared_layers
         self.anchor_generator = AnchorGenerator
         self.box_coding = BoxCoder(weights=(1.,1.,1.,1.))
         
@@ -103,6 +105,54 @@ class RPNStructure(nn.Module):
         self.min_size = 1e-3
 
 
+    def permute_and_flatten(
+        self,
+        output,
+        B,
+        C,
+        W,
+        H,
+    ):
+        # turn RPN model output from grid shape to long list (-1 is the number of anchors!)
+        # both for 2d cls output and 4d reg output
+        # Args
+        #   output (Tensor): model output we want to reshape
+        #   B (int): batch_size
+        #   C (int): number of /output/ channels (actually is 2 for cls, 4 for reg)
+        #   W (int): width
+        #   H (int): height
+
+        re_output = output.view(B, -1, C, H, W)
+        re_output = re_output.permute(0,3,4,1,2)
+        return re_output.reshape(B, -1, C)
+    
+    def concat_box_prediction_layers(
+        self,
+        objectness,
+        pred_bbox_deltas,
+    ):
+        '''
+        This function essentially wraps the premute_and_flatten function for all images in the batch 
+        which is how the model will output the objectness/pred_bbox_deltas - in the wrong shape
+        
+        Output:
+            flattened_box_cls_output (Tensor): 
+        '''
+        flattened_box_cls = []
+        flattened_box_reg = []
+        for cls_per_level, bbx_reg_per_level in zip(objectness, bbx_regs):
+            B, Axc, H, W = cls_per_level.shape
+            _, Ax4, _, _ = bbx_reg_per_level.shape
+            A = Ax4 // 4
+            C = Axc // A
+            flattened_box_cls.append(self.permute_and_reshape(cls_per_level, B, C, W, H))
+            flattened_box_reg.append(self.permute_and_reshape(bbx_reg_per_level, B, 4, W, H)) 
+        
+        box_cls = torch.cat(flattened_box_cls, dim=1).flatten(0, -2)
+        box_reg = torch.cat(flattened_box_reg, dim=1).reshape(-1, 4)
+        return box_cls, box_reg
+
+
 
 
     #....
@@ -113,10 +163,16 @@ class RPNStructure(nn.Module):
         batch_of_anns,
     ):
         '''
-        Full pass of the RPN algorithm. 1. Compute feature maps, 2. Get model predictions, 
-        3. Generate anchors, 4. Re-shape model outputs 5. decode model outputs -> proposals,
-        6. Filter proposals, 7. (If training) Assign targets to anchors, 
-        8. (If training) Compute loss, 9. Combine losses? back propagate? optimiser step?
+        Full pass of the RPN algorithm. 
+        1. Compute feature maps, 
+        2. Get model predictions, 
+        3. Generate anchors, 
+        4. Re-shape model outputs 
+        5. decode model outputs -> proposals,
+        6. Filter proposals, 
+        7. (If training) Assign targets to anchors, 
+        8. (If training) Compute loss, 
+        9. Combine losses? back propagate? optimiser step?
 
         Args:
             batch_of_images (ImageList): images, as tensors, we want to compute predictions for
@@ -149,7 +205,7 @@ class RPNStructure(nn.Module):
             if batch_of_anns is None:
                 raise ValueError("Targets should not be none in training")
 
-            targets = batch_of_anns[] #how are we inputting truth
+            targets = batch_of_anns[''] #how are we inputting truth
             labels, matched_gt_boxes = self.assign_targets_to_anchors(anchors,targets)
             regression_targets = self.box_coding.encode(matched_gt_boxes, anchors)
             loss_clf, loss_reg = self.compute_loss(objectness, pred_bbox_deltas, labels, regression_targets)
