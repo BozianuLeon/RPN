@@ -38,7 +38,7 @@ class SimpleRPN(nn.module):
     def forward(self, img_tensor):
         h = self.conv_layers(img_tensor)
 
-        logits = self.sigmoid(self.cls_logits(h))
+        logits = self.cls_logits(h) #more numeric stability without sigmoid
         bbox_deltas = self.bbox_deltas(h)
 
         return logits, bbox_deltas
@@ -265,6 +265,43 @@ class RPNStructure(nn.Module):
             matched_gt_boxes.append(matched_gt_boxes_per_img)
 
         return matched_gt_boxes, labels
+    
+
+    def compute_loss(
+        self,
+        objectness,
+        pred_bbox_deltas,
+        labels,
+        regression_targets,
+    ):
+        # Function to simultaneously calculate the loss from cls and reg model outputs
+        # Importantly we also use the fg_bg_sampler to only take into account self.batch_size_per_image
+        # bbox proposals per calculation
+
+        sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
+        sampled_pos_inds = torch.nonzero(torch.cat(sampled_pos_inds,dim=0)).squeeze(1)
+        sampled_neg_inds = torch.nonzero(torch.cat(sampled_neg_inds,dim=0)).squeeze(1)
+
+        sampled_inds = torch.cat([sampled_pos_inds,sampled_neg_inds],dim=0)
+        
+        objectness = objectness.flatten()
+        labels = torch.cat(labels,dim=0)
+        regression_targets = torch.cat(regression_targets,dim=0)
+
+        # BCE loss on objectness predictions
+        objectness_loss = F.binary_cross_entropy_with_logits(
+            objectness[sampled_inds],
+            labels[sampled_inds],
+        )
+
+        # F1 Loss on box parameters (not IoU loss)
+        box_loss = F.l1_loss(
+            pred_bbox_deltas[sampled_pos_inds],
+            regression_targets[sampled_pos_inds],
+            reduction='sum'
+        ) / (sampled_inds.numel())
+
+        return objectness_loss, box_loss
 
 
     #....
