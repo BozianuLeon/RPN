@@ -274,7 +274,7 @@ class RPNStructure(nn.Module):
         labels,
         regression_targets,
     ):
-        # Function to simultaneously calculate the loss from cls and reg model outputs
+        # Function to calculate the loss from cls and reg model outputs
         # Importantly we also use the fg_bg_sampler to only take into account self.batch_size_per_image
         # bbox proposals per calculation
 
@@ -304,7 +304,6 @@ class RPNStructure(nn.Module):
         return objectness_loss, box_loss
 
 
-    #....
 
     def foward(
         self,
