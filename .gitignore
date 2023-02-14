@@ -1,6 +1,4 @@
-.gitignore
 demo.ipynb
 .DS_Store
-**/__pycache__/
+__pycache__/
 .ipynb_checkpoints
-utils/__pycache__/dataset.cpython-310.pyc
