@@ -9,7 +9,7 @@ from torchvision.models.detection.anchor_utils import AnchorGenerator
 
 
 
-class SimpleRPN(nn.module):
+class SimpleRPN(nn.Module):
     def __init__(
         self,
         in_channels,
