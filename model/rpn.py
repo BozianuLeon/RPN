@@ -10,22 +10,23 @@ from torchvision.models.detection.anchor_utils import AnchorGenerator
 
 
 class SimpleRPN(nn.Module):
+    ''' 
+    The simple CNN part of the network. All this does is take in an image (a tensor) of a 
+    given size, pass through several convolutional layers stacked with normalisation layers,
+    before outputting two sister layers CLS and REG. Which are the objectness scores and 
+    the deltas taking anchors to nearest ground truth box.
+
+    Input: [3,256,256]
+    Output: [1,anchor_grid_size,anchor_grid_size], [4,anchor_grid_size,anchor_grid_size]
+    '''
+    
     def __init__(
         self,
         in_channels,
         num_anchors,
         conv_depth
     ):
-        ''' 
-        The simple CNN part of the network. All this does is take in an image (a tensor) of a 
-        given size, pass through several convolutional layers stacked with normalisation layers,
-        before outputting two sister layers CLS and REG. Which are the objectness scores and 
-        the deltas taking anchors to nearest ground truth box.
-
-        Input: [3,256,256]
-        Output: [1,anchor_grid_size,anchor_grid_size], [4,anchor_grid_size,anchor_grid_size]
-        '''
-
+        super(SimpleRPN, self).__init__()
         convs_list = []
         for _ in range(conv_depth):
             convs_list.append(Conv2dNormActivation(in_channels,in_channels,kernel_size=3,norm_layer=torch.nn.BatchNorm2d))
