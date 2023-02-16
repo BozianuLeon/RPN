@@ -146,15 +146,13 @@ class CustomCOCODataLoader(DataLoader):
             path_list.append(my_anns["path"])
         
         batch_images = torch.stack(img_tensor_list,dim=0)
-        batch_image_sizes = [i.shape[-2:] for i in batch_images]
-        batch_image_list = ImageList(batch_images,batch_image_sizes)
 
         batch_anns = dict(bboxes = scaled_boxes_list,
                           labels = labels_list,
                           image_index = index_list,
                           image_paths = path_list,)
 
-        return batch_image_list, batch_anns
+        return batch_images, batch_anns
     
     
     def loader(self):
