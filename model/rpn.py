@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torchvision.models.detection.image_list import ImageList
 from torchvision.ops import boxes as box_ops, Conv2dNormActivation, box_iou
 from torchvision.models.detection._utils import Matcher, BoxCoder, BalancedPositiveNegativeSampler
 from torchvision.models.detection.anchor_utils import AnchorGenerator
@@ -23,6 +24,7 @@ class SimpleRPN(nn.Module):
     def __init__(
         self,
         in_channels,
+        out_channels,
         num_anchors,
         conv_depth
     ):
@@ -31,19 +33,21 @@ class SimpleRPN(nn.Module):
         for _ in range(conv_depth):
             convs_list.append(Conv2dNormActivation(in_channels,in_channels,kernel_size=3,norm_layer=torch.nn.BatchNorm2d))
         self.conv_layers = nn.Sequential(*convs_list)
+        self.conv_outchan = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
 
         self.sigmoid = nn.Sigmoid()
-        self.cls_logits = nn.Conv2d(in_channels,num_anchors,kernel_size=1,stride=1)
-        self.bbox_deltas = nn.Conv2d(in_channels,num_anchors*4,kernel_size=1,stride=1)
+        self.cls_logits = nn.Conv2d(out_channels,num_anchors,kernel_size=1,stride=1)
+        self.bbox_deltas = nn.Conv2d(out_channels,num_anchors*4,kernel_size=1,stride=1)
 
     def forward(self, img_tensor):
-        h = self.conv_layers(img_tensor)
-
-        logits = self.cls_logits(h) #more numeric stability without sigmoid
-        bbox_deltas = self.bbox_deltas(h)
-
-        return logits, bbox_deltas
-
+        logits = []
+        bbox_reg = []
+        for feature in img_tensor:
+            h = self.conv_layers(feature)
+            h = self.conv_outchan(h)
+            logits.append(self.cls_logits(h)) # more numeric stability without sigmoid
+            bbox_reg.append(self.bbox_deltas(h))
+        return logits, bbox_reg
 
 
 
@@ -70,7 +74,13 @@ class RPNStructure(nn.Module):
 
     def __init__(
         self,
+        #anchor generator
+        sizes,
+        aspect_ratios,
+        #models
         model,
+        in_channels,
+        out_channels,
         shared_layers,
         #training arguments
         fg_iou_threshold,
@@ -84,9 +94,12 @@ class RPNStructure(nn.Module):
         score_threshold
     ):
         super().__init__()
-        self.head = model
-        self.shared_network = shared_layers
-        self.anchor_generator = AnchorGenerator
+        self.sizes = sizes
+        self.aspect_ratios = len(sizes) * aspect_ratios
+        self.num_anchors_per_cell = len(aspect_ratios) * len(sizes)
+        self.head = model(in_channels, out_channels, self.num_anchors_per_cell, conv_depth=3)
+        self.shared_network = shared_layers()
+        self.anchor_generator = AnchorGenerator(self.sizes,self.aspect_ratios)
         self.box_coding = BoxCoder(weights=(1.,1.,1.,1.))
         
         #training
@@ -146,8 +159,8 @@ class RPNStructure(nn.Module):
             _, Ax4, _, _ = bbx_reg_per_level.shape
             A = Ax4 // 4
             C = Axc // A
-            flattened_box_cls.append(self.permute_and_reshape(cls_per_level, B, C, W, H))
-            flattened_box_reg.append(self.permute_and_reshape(bbx_reg_per_level, B, 4, W, H)) 
+            flattened_box_cls.append(self.permute_and_flatten(cls_per_level, B, C, W, H))
+            flattened_box_reg.append(self.permute_and_flatten(bbx_reg_per_level, B, 4, W, H)) 
         
         box_cls = torch.cat(flattened_box_cls, dim=1).flatten(start_dim=0, end_dim=-2)
         box_reg = torch.cat(flattened_box_reg, dim=1).reshape(-1, 4)
@@ -306,7 +319,7 @@ class RPNStructure(nn.Module):
 
 
 
-    def foward(
+    def forward(
         self,
         batch_of_images,
         batch_of_anns,
@@ -324,7 +337,7 @@ class RPNStructure(nn.Module):
         9. Combine losses? back propagate? optimiser step?
 
         Args:
-            batch_of_images (ImageList): images, as tensors, we want to compute predictions for
+            batch_of_images (Tensor): images, as tensors, we want to compute predictions for
             batch_of_anns (List[Dict[str,tensor]]): ground-truth boxes, labels, optional
         
         Returns:
@@ -337,13 +350,18 @@ class RPNStructure(nn.Module):
         feature_maps = self.shared_network(batch_of_images)
         
         objectness, pred_bbox_deltas = self.head(feature_maps)
-        anchors = self.anchor_generator(batch_of_images,feature_maps)
+        image_shapes = [image.shape[-2:] for image in batch_of_images]
+        image_list = ImageList(batch_of_images,image_shapes)
+        anchors = self.anchor_generator(image_list,feature_maps)
 
         num_images_in_batch = len(anchors)
         num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness]
         num_anchors_per_level = [s[0]*s[1]*s[2] for s in num_anchors_per_level_shape_tensors]
 
         objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
+        print(pred_bbox_deltas.shape)
+        print(len(anchors))
+        print(anchors[0].shape)
         proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
         proposals = proposals.view(num_images_in_batch, -1, 4)
         final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, batch_of_images.image_sizes)
