@@ -277,7 +277,7 @@ class RPNStructure(nn.Module):
         #levels = torch.zeros_like(objectness).reshape(1,-1)
         #print('new levels\n',len(levels),'\n',levels)
         
-        print('num_anchors_per_level (1 level here)',num_anchors_per_level)
+        #print('num_anchors_per_level (1 level here)',num_anchors_per_level)
 
         top_n_idx = self._get_top_n_idx(objectness, num_anchors_per_level) #pre_nms_top_n happens within
         batch_images = torch.arange(0,num_images_in_batch)
@@ -433,7 +433,7 @@ class RPNStructure(nn.Module):
         
         losses = {}
         if self.training:
-            print("Trainning RPN ...")
+            #print("Trainning RPN ...")
             if batch_of_anns is None:
                 raise ValueError("Targets should not be none in training")
 
