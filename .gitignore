@@ -1,5 +1,6 @@
 demo.ipynb
 .DS_Store
-__pycache__/
-.ipynb_checkpoints
-utils/__pycache__/dataset.cpython-310.pyc
+.ipynb_checkpoints/
+data/
+model/__pycache__/
+utils/__pycache__/
