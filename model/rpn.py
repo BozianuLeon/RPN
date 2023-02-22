@@ -1,11 +1,15 @@
+from typing import Dict, List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torchvision.models.detection.image_list import ImageList
 from torchvision.ops import boxes as box_ops, Conv2dNormActivation, box_iou
-from torchvision.models.detection._utils import Matcher, BoxCoder, BalancedPositiveNegativeSampler
+#from torchvision.models.detection._utils import Matcher, BoxCoder, BalancedPositiveNegativeSampler
+from torchvision.models.detection._utils import Matcher, BalancedPositiveNegativeSampler
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 
+from utils.utils import BoxCoder
 
 
 
@@ -26,14 +30,15 @@ class SimpleRPN(nn.Module):
         in_channels,
         out_channels,
         num_anchors,
-        conv_depth
+        conv_depth=3
     ):
         super(SimpleRPN, self).__init__()
         convs_list = []
         for _ in range(conv_depth):
             convs_list.append(Conv2dNormActivation(in_channels,in_channels,kernel_size=3,norm_layer=torch.nn.BatchNorm2d))
         self.conv_layers = nn.Sequential(*convs_list)
-        self.conv_outchan = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+
+        self.conv_outchan = nn.Conv2d(in_channels, out_channels, kernel_size=2, padding=1)
 
         self.sigmoid = nn.Sigmoid()
         self.cls_logits = nn.Conv2d(out_channels,num_anchors,kernel_size=1,stride=1)
@@ -47,7 +52,32 @@ class SimpleRPN(nn.Module):
             h = self.conv_outchan(h)
             logits.append(self.cls_logits(h)) # more numeric stability without sigmoid
             bbox_reg.append(self.bbox_deltas(h))
+
         return logits, bbox_reg
+
+
+class SimplerRPN(nn.Module):
+    def __init__(
+        self, 
+        in_channels, 
+        out_channels, 
+        num_anchors,
+    ):
+
+        super(SimplerRPN, self).__init__()
+        self.conv_x = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.cls_logits = nn.Conv2d(out_channels, num_anchors, kernel_size=1, stride=1)
+        self.bbx_reg = nn.Conv2d(out_channels, num_anchors * 4, kernel_size=1, stride=1)
+
+    def forward(self, x):
+        logits = []
+        bbx_regs = []
+        for feature_map in x:
+            y = self.conv_x(feature_map)
+            logits.append(self.cls_logits(y))
+            bbx_regs.append(self.bbx_reg(y))
+            print('HAHAMODEL:\n',self.bbx_reg(y).shape,'\n',self.bbx_reg(y).shape[0]*self.bbx_reg(y).shape[1]*self.bbx_reg(y).shape[2]*self.bbx_reg(y).shape[3])
+        return logits, bbx_regs
 
 
 
@@ -91,16 +121,22 @@ class RPNStructure(nn.Module):
         pre_nms_top_n,
         nms_threshold,
         post_nms_top_n,
-        score_threshold
+        score_threshold,
     ):
         super().__init__()
         self.sizes = sizes
         self.aspect_ratios = len(sizes) * aspect_ratios
-        self.num_anchors_per_cell = len(aspect_ratios) * len(sizes)
-        self.head = model(in_channels, out_channels, self.num_anchors_per_cell, conv_depth=3)
-        self.shared_network = shared_layers()
-        self.anchor_generator = AnchorGenerator(self.sizes,self.aspect_ratios)
+        print('sizes',len(sizes),sizes)
+        print('aspect_ratios\n0',len(len(sizes)*aspect_ratios),len(sizes) * aspect_ratios)
+
+        self.anchor_generator = AnchorGenerator(self.sizes, self.aspect_ratios)
+        self.num_anchors_per_cell = self.anchor_generator.num_anchors_per_location()[0]
         self.box_coding = BoxCoder(weights=(1.,1.,1.,1.))
+        print('anchor utils method', self.anchor_generator.num_anchors_per_location(),self.anchor_generator.num_anchors_per_location()[0])
+        print('old method (wrong)',len(sizes)*len(aspect_ratios))
+        self.head = model(in_channels, out_channels, self.num_anchors_per_cell)
+        self.shared_network = shared_layers()
+        
         
         #training
         self.box_similarity = box_iou
@@ -115,8 +151,8 @@ class RPNStructure(nn.Module):
         self._pre_nms_top_n = pre_nms_top_n #for now just one topN for both train+test
         self.nms_thresh = nms_threshold
         self._post_nms_top_n = post_nms_top_n #for now just one topN for both train+test
+        self.min_box_size = 1e-3
         self.score_thresh = score_threshold
-        self.min_size = 1e-3
 
 
     def permute_and_flatten(
@@ -179,7 +215,7 @@ class RPNStructure(nn.Module):
         anchor_idx_offset = 0
         for o in  objectness.split(num_anchors_per_level, dim=1):
             anchors_in_level = o.shape[1]
-            pre_nms_top_n = min(self.pre_nms_top_n(), anchors_in_level)
+            pre_nms_top_n = min(self._pre_nms_top_n, anchors_in_level) # changed from self.pre_nms_top_n()
             _, anchor_idx = o.topk(pre_nms_top_n, dim=1)
             top_n_idx.append(anchor_idx + anchor_idx_offset)
             anchor_idx_offset += anchors_in_level
@@ -207,12 +243,20 @@ class RPNStructure(nn.Module):
         '''
         num_images_in_batch = proposals.shape[0]
         objectness.detach() #dont backprop here
-        objectness.reshape(num_images_in_batch,-1)
+        objectness = objectness.reshape(num_images_in_batch,-1)
+        print('objectness.shape',objectness.shape)
 
         #give anchors in each level an index referring to the level they belong to (should be 1 for us)
-        levels = [torch.full((anchors_in_level,), idx, dtype=torch.int64) for idx, anchors_in_level in enumerate(num_anchors_per_level)]
-        levels = torch.cat(levels,dim=0)
-        levels = levels.reshape(1,-1).expand_as(objectness)
+        levels = [torch.full((n,), idx, dtype=torch.int64) for idx, n in enumerate(num_anchors_per_level)]
+        print('levels\n',len(levels),'\n',levels)
+        levels = torch.cat(levels, 0)
+        print('levels\n',len(levels),'\n',levels)
+        levels = levels.reshape(1, -1).expand_as(objectness)
+
+        #levels = torch.zeros_like(objectness).reshape(1,-1)
+        #print('new levels\n',len(levels),'\n',levels)
+        
+        print('num_anchors_per_level',num_anchors_per_level)
 
         top_n_idx = self._get_top_n_idx(objectness, num_anchors_per_level) #pre_nms_top_n happens within
         batch_images = torch.arange(0,num_images_in_batch)
@@ -230,11 +274,11 @@ class RPNStructure(nn.Module):
             keep = box_ops.remove_small_boxes(boxes, self.min_box_size)
             boxes, scores, level = boxes[keep], scores[keep], level[keep]
 
-            keep = torch.where(scores >= self.score_threshold)[0]
+            keep = torch.where(scores >= self.score_thresh)[0]
             boxes, scores, level = boxes[keep], scores[keep], level[keep]
 
-            keep = box_ops.batched_nms(boxes, scores, level, self.nms_theshold)
-            keep = keep[:self.post_nms_top_n]
+            keep = box_ops.batched_nms(boxes, scores, level, self.nms_thresh)
+            keep = keep[:self._post_nms_top_n]
 
             boxes, scores = boxes[keep], scores[keep]
 
@@ -353,19 +397,23 @@ class RPNStructure(nn.Module):
         image_shapes = [image.shape[-2:] for image in batch_of_images]
         image_list = ImageList(batch_of_images,image_shapes)
         anchors = self.anchor_generator(image_list,feature_maps)
+        print('Anchors:',len(anchors))
+        print(anchors[0].shape)
 
         num_images_in_batch = len(anchors)
-        num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness]
-        num_anchors_per_level = [s[0]*s[1]*s[2] for s in num_anchors_per_level_shape_tensors]
+        num_anchors_per_level = [o[0].numel() for o in objectness]
+        print('num_anchors_per_level\n',num_anchors_per_level)
 
         objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
+        print('Model outputs:')
+        print(objectness.shape)
         print(pred_bbox_deltas.shape)
-        print(len(anchors))
-        print(anchors[0].shape)
+
         proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
         proposals = proposals.view(num_images_in_batch, -1, 4)
-        final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, batch_of_images.image_sizes)
-
+        #final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, batch_of_images.image_sizes)
+        final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, image_shapes)
+        print('final shapes',len(final_boxes),final_boxes[0].shape,len(final_scores), final_scores[0].shape)
         losses = {}
         if self.training:
             print("Trainning RPN ...")
