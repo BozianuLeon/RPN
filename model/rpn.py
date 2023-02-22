@@ -76,8 +76,29 @@ class SimplerRPN(nn.Module):
             y = self.conv_x(feature_map)
             logits.append(self.cls_logits(y))
             bbx_regs.append(self.bbx_reg(y))
-            print('HAHAMODEL:\n',self.bbx_reg(y).shape,'\n',self.bbx_reg(y).shape[0]*self.bbx_reg(y).shape[1]*self.bbx_reg(y).shape[2]*self.bbx_reg(y).shape[3])
         return logits, bbx_regs
+
+
+
+
+class SharedConvolutionalLayers(nn.Module):
+    def __init__(self, out_channels):
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(3,48,kernel_size=3,padding=1)
+        self.conv2 = torch.nn.Conv2d(48,128,kernel_size=3,padding=1)
+        self.conv3 = torch.nn.Conv2d(128,out_channels,kernel_size=3,padding=1)
+
+    def forward(self,x):
+        shared_output = []
+        x = torch.nn.functional.relu(self.conv1(x))
+        x = torch.nn.functional.relu(self.conv2(x))
+        x = torch.nn.functional.relu(self.conv3(x))
+
+        shared_output.append(x)
+
+        return shared_output
+
+
 
 
 
@@ -134,8 +155,9 @@ class RPNStructure(nn.Module):
         self.box_coding = BoxCoder(weights=(1.,1.,1.,1.))
         print('anchor utils method', self.anchor_generator.num_anchors_per_location(),self.anchor_generator.num_anchors_per_location()[0])
         print('old method (wrong)',len(sizes)*len(aspect_ratios))
+
         self.head = model(in_channels, out_channels, self.num_anchors_per_cell)
-        self.shared_network = shared_layers()
+        self.shared_network = shared_layers(in_channels)
         
         
         #training
@@ -243,7 +265,7 @@ class RPNStructure(nn.Module):
         '''
         num_images_in_batch = proposals.shape[0]
         objectness.detach() #dont backprop here
-        objectness = objectness.reshape(num_images_in_batch,-1)
+        objectness = objectness.reshape(num_images_in_batch,-1) #important: reshape was not acting in place
         print('objectness.shape',objectness.shape)
 
         #give anchors in each level an index referring to the level they belong to (should be 1 for us)
@@ -420,8 +442,9 @@ class RPNStructure(nn.Module):
             if batch_of_anns is None:
                 raise ValueError("Targets should not be none in training")
 
-            targets = batch_of_anns[''] #how are we inputting truth
-            labels, matched_gt_boxes = self.assign_targets_to_anchors(anchors,targets)
+            #targets = batch_of_anns[''] #how are we inputting truth
+            targets = batch_of_anns
+            matched_gt_boxes, labels = self.assign_targets_to_anchors(anchors,targets)
             regression_targets = self.box_coding.encode(matched_gt_boxes, anchors)
             loss_clf, loss_reg = self.compute_loss(objectness, pred_bbox_deltas, labels, regression_targets)
             losses = {"loss_clf": loss_clf, "loss_reg": loss_reg}
