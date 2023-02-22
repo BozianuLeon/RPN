@@ -5,7 +5,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torchvision.models.detection.image_list import ImageList
 from torchvision.ops import boxes as box_ops, Conv2dNormActivation, box_iou
-#from torchvision.models.detection._utils import Matcher, BoxCoder, BalancedPositiveNegativeSampler
 from torchvision.models.detection._utils import Matcher, BalancedPositiveNegativeSampler
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 
@@ -38,11 +37,11 @@ class SimpleRPN(nn.Module):
             convs_list.append(Conv2dNormActivation(in_channels,in_channels,kernel_size=3,norm_layer=torch.nn.BatchNorm2d))
         self.conv_layers = nn.Sequential(*convs_list)
 
-        self.conv_outchan = nn.Conv2d(in_channels, out_channels, kernel_size=2, padding=1)
+        self.conv_outchan = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
 
         self.sigmoid = nn.Sigmoid()
-        self.cls_logits = nn.Conv2d(out_channels,num_anchors,kernel_size=1,stride=1)
-        self.bbox_deltas = nn.Conv2d(out_channels,num_anchors*4,kernel_size=1,stride=1)
+        self.cls_logits = nn.Conv2d(out_channels, num_anchors, kernel_size=1, stride=1)
+        self.bbox_deltas = nn.Conv2d(out_channels, num_anchors * 4,kernel_size=1, stride=1)
 
     def forward(self, img_tensor):
         logits = []
@@ -147,8 +146,8 @@ class RPNStructure(nn.Module):
         super().__init__()
         self.sizes = sizes
         self.aspect_ratios = len(sizes) * aspect_ratios
-        print('sizes',len(sizes),sizes)
-        print('aspect_ratios\n0',len(len(sizes)*aspect_ratios),len(sizes) * aspect_ratios)
+        #print('sizes',len(sizes),sizes)
+        #print('aspect_ratios\n0',len(len(sizes)*aspect_ratios),len(sizes) * aspect_ratios)
 
         self.anchor_generator = AnchorGenerator(self.sizes, self.aspect_ratios)
         self.num_anchors_per_cell = self.anchor_generator.num_anchors_per_location()[0]
@@ -266,19 +265,19 @@ class RPNStructure(nn.Module):
         num_images_in_batch = proposals.shape[0]
         objectness.detach() #dont backprop here
         objectness = objectness.reshape(num_images_in_batch,-1) #important: reshape was not acting in place
-        print('objectness.shape',objectness.shape)
+        #print('objectness.shape',objectness.shape)
 
         #give anchors in each level an index referring to the level they belong to (should be 1 for us)
         levels = [torch.full((n,), idx, dtype=torch.int64) for idx, n in enumerate(num_anchors_per_level)]
-        print('levels\n',len(levels),'\n',levels)
+        #print('levels\n',len(levels),'\n',levels)
         levels = torch.cat(levels, 0)
-        print('levels\n',len(levels),'\n',levels)
+        #print('levels\n',len(levels),'\n',levels)
         levels = levels.reshape(1, -1).expand_as(objectness)
 
         #levels = torch.zeros_like(objectness).reshape(1,-1)
         #print('new levels\n',len(levels),'\n',levels)
         
-        print('num_anchors_per_level',num_anchors_per_level)
+        print('num_anchors_per_level (1 level here)',num_anchors_per_level)
 
         top_n_idx = self._get_top_n_idx(objectness, num_anchors_per_level) #pre_nms_top_n happens within
         batch_images = torch.arange(0,num_images_in_batch)
@@ -419,23 +418,19 @@ class RPNStructure(nn.Module):
         image_shapes = [image.shape[-2:] for image in batch_of_images]
         image_list = ImageList(batch_of_images,image_shapes)
         anchors = self.anchor_generator(image_list,feature_maps)
-        print('Anchors:',len(anchors))
-        print(anchors[0].shape)
+        print('Anchors:',len(anchors),anchors[0].shape)
 
         num_images_in_batch = len(anchors)
         num_anchors_per_level = [o[0].numel() for o in objectness]
-        print('num_anchors_per_level\n',num_anchors_per_level)
 
         objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
-        print('Model outputs:')
-        print(objectness.shape)
-        print(pred_bbox_deltas.shape)
+        print('Model outputs:',objectness.shape,pred_bbox_deltas.shape)
 
         proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
         proposals = proposals.view(num_images_in_batch, -1, 4)
-        #final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, batch_of_images.image_sizes)
+        
         final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, image_shapes)
-        print('final shapes',len(final_boxes),final_boxes[0].shape,len(final_scores), final_scores[0].shape)
+        
         losses = {}
         if self.training:
             print("Trainning RPN ...")

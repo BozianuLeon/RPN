@@ -70,12 +70,12 @@ class BoxCoder:
 
     def decode(self, pred_bbx_deltas:Tensor, anchors:List[Tensor]):
         boxes_per_image  = [ a.size(0) for a in anchors ]
-        print('boxes_per_image:',boxes_per_image)
-        print('boxes_sum',sum(boxes_per_image))
+        # print('boxes_per_image:',boxes_per_image)
+        # print('boxes_sum',sum(boxes_per_image))
         boxes_sum = sum(boxes_per_image)
         concat_anchors = torch.cat(anchors, dim=0)
-        print('concat_anchors:',len(concat_anchors))
-        print('pred_bbx_deltas',pred_bbx_deltas.shape)
+        # print('concat_anchors:',len(concat_anchors))
+        # print('pred_bbx_deltas',pred_bbx_deltas.shape)
         assert boxes_sum > 0, "Sum of pred boxes per image in decode < 0"
         pred_bbx = pred_bbx_deltas.reshape(boxes_sum, -1)
         pred_bbx = self.decode_single(pred_bbx, concat_anchors)
@@ -121,10 +121,8 @@ class BoxCoder:
         return pred_boxes
 
     def encode(self, matched_gt_boxes:List[Tensor], proposed_boxes:List[Tensor]) -> List[Tensor]:
-        boxes_per_image = [ len(box) for box in proposed_boxes ]
-        print('matched_gt_boxes',matched_gt_boxes[0].shape)
+        boxes_per_image = [len(box) for box in proposed_boxes]
         reference_boxes = torch.cat(matched_gt_boxes, dim=0)
-        print('reference_boxes',reference_boxes.shape)
         proposals = torch.cat(proposed_boxes, dim=0)
         targets = self.encode_single(reference_boxes, proposals)
         return targets.split(boxes_per_image, dim=0)
