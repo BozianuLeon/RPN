@@ -368,18 +368,22 @@ class RPNStructure(nn.Module):
         regression_targets = torch.cat(regression_targets,dim=0)
 
         # BCE loss on objectness predictions
+        # uses default reduction='mean'
         objectness_loss = F.binary_cross_entropy_with_logits(
             objectness[sampled_inds],
             labels[sampled_inds],
         )
 
         # F1 Loss on box parameters (not IoU loss)
+        #reduction='sum' here sums up over the batch does not divide by n (ensures roughly same size ass L_cls)
+        #ensures loss scale is roughly equal (not dominated by L_cls)
+        #also here, as we dont divide by n we are dependant on batch_size
         box_loss = F.l1_loss(
             pred_bbox_deltas[sampled_pos_inds],
             regression_targets[sampled_pos_inds],
             reduction='sum'
         ) / (sampled_inds.numel())
-
+ 
         return objectness_loss, box_loss
 
 
@@ -387,7 +391,7 @@ class RPNStructure(nn.Module):
     def forward(
         self,
         batch_of_images,
-        batch_of_anns,
+        batch_of_anns = None,
     ):
         '''
         Full pass of the RPN algorithm. 
@@ -403,7 +407,7 @@ class RPNStructure(nn.Module):
 
         Args:
             batch_of_images (Tensor): images, as tensors, we want to compute predictions for
-            batch_of_anns (List[Dict[str,tensor]]): ground-truth boxes, labels, optional
+            batch_of_anns (List[Dict[str,tensor]]): ground-truth boxes, labels, OPTIONAL
         
         Returns:
             boxes (List[Tensor]): the predicted boxes from the RPN, one tensor per image
@@ -418,13 +422,13 @@ class RPNStructure(nn.Module):
         image_shapes = [image.shape[-2:] for image in batch_of_images]
         image_list = ImageList(batch_of_images,image_shapes)
         anchors = self.anchor_generator(image_list,feature_maps)
-        print('Anchors:',len(anchors),anchors[0].shape)
+        #print('Anchors:',len(anchors),anchors[0].shape)
 
         num_images_in_batch = len(anchors)
         num_anchors_per_level = [o[0].numel() for o in objectness]
 
         objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
-        print('Model outputs:',objectness.shape,pred_bbox_deltas.shape)
+        #print('Model outputs:',objectness.shape,pred_bbox_deltas.shape)
 
         proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
         proposals = proposals.view(num_images_in_batch, -1, 4)
@@ -432,7 +436,7 @@ class RPNStructure(nn.Module):
         final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, image_shapes)
         
         losses = {}
-        if self.training:
+        if self.training or batch_of_anns!=None:
             #print("Trainning RPN ...")
             if batch_of_anns is None:
                 raise ValueError("Targets should not be none in training")
