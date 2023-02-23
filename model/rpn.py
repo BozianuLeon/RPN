@@ -372,16 +372,19 @@ class RPNStructure(nn.Module):
         objectness_loss = F.binary_cross_entropy_with_logits(
             objectness[sampled_inds],
             labels[sampled_inds],
+            reduction='mean'
         )
 
         # F1 Loss on box parameters (not IoU loss)
         #reduction='sum' here sums up over the batch does not divide by n (ensures roughly same size ass L_cls)
         #ensures loss scale is roughly equal (not dominated by L_cls)
         #also here, as we dont divide by n we are dependant on batch_size
+        #discuss 'mean' vs 'sum' reduction!
+        #also divided by the number of sampled inds! (256 i think)
         box_loss = F.l1_loss(
             pred_bbox_deltas[sampled_pos_inds],
             regression_targets[sampled_pos_inds],
-            reduction='sum'
+            reduction='mean'
         ) / (sampled_inds.numel())
  
         return objectness_loss, box_loss
