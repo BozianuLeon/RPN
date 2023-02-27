@@ -4,3 +4,6 @@ demo.ipynb
 data/
 model/__pycache__/
 utils/__pycache__/
+*.pth
+*.out
+*-loss-list*
