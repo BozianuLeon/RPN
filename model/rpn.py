@@ -99,10 +99,6 @@ class SharedConvolutionalLayers(nn.Module):
 
 
 
-
-
-
-
 class RPNStructure(nn.Module):
     '''
     Contains the functions and logic needed to run the RPN. The forward call does the heavy lifting
@@ -142,6 +138,8 @@ class RPNStructure(nn.Module):
         nms_threshold,
         post_nms_top_n,
         score_threshold,
+        #send to gpu
+        device,
     ):
         super().__init__()
         self.sizes = sizes
@@ -155,8 +153,14 @@ class RPNStructure(nn.Module):
         print('anchor utils method', self.anchor_generator.num_anchors_per_location(),self.anchor_generator.num_anchors_per_location()[0])
         print('old method (wrong)',len(sizes)*len(aspect_ratios))
 
-        self.head = model(in_channels, out_channels, self.num_anchors_per_cell)
-        self.shared_network = shared_layers(in_channels)
+        # we need to cover the case where we are loading a model in! in this case it does not need init args
+        if isinstance(model,type):
+            self.head = model(in_channels, out_channels, self.num_anchors_per_cell)
+            self.head.to(device)
+        else:
+            self.head = model
+            self.head.to(device)
+        self.shared_network = shared_layers(in_channels).to(device)
         
         
         #training
@@ -174,6 +178,8 @@ class RPNStructure(nn.Module):
         self._post_nms_top_n = post_nms_top_n #for now just one topN for both train+test
         self.min_box_size = 1e-3
         self.score_thresh = score_threshold
+
+        self.device = device
 
 
     def permute_and_flatten(
@@ -372,7 +378,6 @@ class RPNStructure(nn.Module):
         objectness_loss = F.binary_cross_entropy_with_logits(
             objectness[sampled_inds],
             labels[sampled_inds],
-            reduction='mean'
         )
 
         # F1 Loss on box parameters (not IoU loss)
@@ -381,12 +386,19 @@ class RPNStructure(nn.Module):
         #also here, as we dont divide by n we are dependant on batch_size
         #discuss 'mean' vs 'sum' reduction!
         #also divided by the number of sampled inds! (256 i think)
+        
+        # box_loss = F.smooth_l1_loss(
+        #     pred_bbox_deltas[sampled_pos_inds],
+        #     regression_targets[sampled_pos_inds],
+        #     beta = 1/9,
+        #     reduction='sum'
+        # ) / (sampled_inds.numel())
         box_loss = F.l1_loss(
             pred_bbox_deltas[sampled_pos_inds],
             regression_targets[sampled_pos_inds],
-            reduction='mean'
+            reduction='sum'
         ) / (sampled_inds.numel())
- 
+
         return objectness_loss, box_loss
 
 
@@ -439,7 +451,7 @@ class RPNStructure(nn.Module):
         final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, image_shapes)
         
         losses = {}
-        if self.training or batch_of_anns!=None:
+        if self.training or (batch_of_anns is not None):
             #print("Trainning RPN ...")
             if batch_of_anns is None:
                 raise ValueError("Targets should not be none in training")
