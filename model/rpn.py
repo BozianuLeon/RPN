@@ -8,7 +8,7 @@ from torchvision.ops import boxes as box_ops, Conv2dNormActivation, box_iou
 from torchvision.models.detection._utils import Matcher, BalancedPositiveNegativeSampler
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 
-from utils.utils import BoxCoder
+from utils.utils import BoxCoder, move_dev
 
 
 
@@ -152,6 +152,7 @@ class RPNStructure(nn.Module):
         device,
     ):
         super().__init__()
+        self.device = device
         self.sizes = sizes
         self.aspect_ratios = len(sizes) * aspect_ratios
         #print('sizes',len(sizes),sizes)
@@ -166,13 +167,13 @@ class RPNStructure(nn.Module):
         # we need to cover the case where we are loading a model in! in this case it does not need init args
         if isinstance(model,type):
             self.head = model(in_channels, out_channels, self.num_anchors_per_cell)
-            self.head.to(device)
+            self.head.to(self.device)
         else:
             self.head = model
-            self.head.to(device)
+            self.head.to(self.device)
 
         if isinstance(shared_layers,type):
-            self.shared_network = shared_layers(in_channels).to(device)
+            self.shared_network = shared_layers(in_channels).to(self.device)
         else:
             self.shared_network = shared_layers
         
@@ -423,7 +424,7 @@ class RPNStructure(nn.Module):
     ):
         '''
         Full pass of the RPN algorithm. 
-        1. Compute feature maps, 
+        1. Compute feature maps,  (VGG or homemade)
         2. Get model predictions, 
         3. Generate anchors, 
         4. Re-shape model outputs 
@@ -443,17 +444,19 @@ class RPNStructure(nn.Module):
             losses (Dict[str,Tensor]): the losses from the model in training (empty in test)
 
         '''
+
+        batch_of_images = move_dev(batch_of_images,self.device)
+
         with torch.no_grad():
             feature_maps = self.shared_network(batch_of_images)
-            print('feature maps',len(feature_maps),feature_maps[0].shape)
+            #print('feature maps',len(feature_maps),feature_maps[0].shape)
         
         objectness, pred_bbox_deltas = self.head(feature_maps)
-        print('objectness',len(objectness),objectness[0].shape)
-        print('pred_bbox_deltas',len(pred_bbox_deltas),pred_bbox_deltas[0].shape)
+        # print('objectness',len(objectness),objectness[0].shape)
+        # print('pred_bbox_deltas',len(pred_bbox_deltas),pred_bbox_deltas[0].shape)
         image_shapes = [image.shape[-2:] for image in batch_of_images]
         image_list = ImageList(batch_of_images,image_shapes)
         anchors = self.anchor_generator(image_list,feature_maps)
-        print('Anchors:',len(anchors),anchors[0].shape)
 
         num_images_in_batch = len(anchors)
         num_anchors_per_level = [o[0].numel() for o in objectness]
@@ -468,12 +471,10 @@ class RPNStructure(nn.Module):
         
         losses = {}
         if self.training or (batch_of_anns is not None):
-            #print("Trainning RPN ...")
             if batch_of_anns is None:
                 raise ValueError("Targets should not be none in training")
 
-            #targets = batch_of_anns[''] #how are we inputting truth
-            targets = batch_of_anns
+            targets = move_dev(batch_of_anns,self.device)
             matched_gt_boxes, labels = self.assign_targets_to_anchors(anchors,targets)
             regression_targets = self.box_coding.encode(matched_gt_boxes, anchors)
             loss_clf, loss_reg = self.compute_loss(objectness, pred_bbox_deltas, labels, regression_targets)
