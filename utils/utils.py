@@ -4,8 +4,60 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.functional import Tensor
 from torchvision.ops import boxes as box_ops
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 from collections import OrderedDict
+
+
+
+def move_dev(
+    tensor: Union[torch.Tensor, tuple, list, dict], dev: Union[str, torch.device]
+) -> Union[torch.Tensor, tuple, list, dict]:
+    """
+    MATTSTOOLS
+    Returns a copy of a tensor on the targetted device. This function calls
+    pytorch's .to() but allows for values to be a.
+
+    - list of tensors
+    - tuple of tensors
+    - dict of tensors
+    """
+
+    # Select the pytorch device object if dev was a string
+    if isinstance(dev, str):
+        dev = sel_device(dev)
+
+    if isinstance(tensor, tuple):
+        return tuple(t.to(dev) for t in tensor)
+    elif isinstance(tensor, list):
+        return [t.to(dev) for t in tensor]
+    elif isinstance(tensor, dict):
+        return {t: tensor[t].to(dev) for t in tensor}
+    else:
+        return tensor.to(dev)
+
+
+
+def sel_device(dev: Union[str, torch.device]) -> torch.device:
+    """Returns a pytorch device given a string (or a device)
+
+    - giving cuda or gpu will run a hardware check first
+    """
+    # Not from config, but when device is specified already
+    if isinstance(dev, torch.device):
+        return dev
+
+    # Tries to get gpu if available
+    if dev in ["cuda", "gpu"]:
+        print("Trying to select cuda based on available hardware")
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Tries to get specific gpu
+    elif "cuda" in dev:
+        print(f"Trying to select {dev} based on available hardware")
+        dev = dev if torch.cuda.is_available() else "cpu"
+
+    print(f"Running on hardware: {dev}")
+    return torch.device(dev)
 
 
 
