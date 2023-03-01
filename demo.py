@@ -4,11 +4,10 @@ import torchvision
 from matplotlib import pyplot as plt
 import pickle
 
-from model.rpn import SimpleRPN, RPNStructure, SimplerRPN, SharedConvolutionalLayers
+from model.rpn import SimpleRPN, SharedConvolutionalLayers, RPNStructure
 from utils.dataset import CustomCOCODataset, CustomCOCODataLoader
 
-
-
+# Get data
 dataset = CustomCOCODataset(root_folder="data/val2017",
                             annotation_json="data/annotations/instances_val2017.json")
 print('Images in dataset:',len(dataset))
