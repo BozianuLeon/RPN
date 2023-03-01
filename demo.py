@@ -1,26 +1,17 @@
 import torch
 import torchvision
-from tqdm.auto import tqdm
 
-import numpy as np
-import matplotlib
 from matplotlib import pyplot as plt
-from PIL import Image
 import pickle
 
 from model.rpn import SimpleRPN, RPNStructure, SimplerRPN, SharedConvolutionalLayers
 from utils.dataset import CustomCOCODataset, CustomCOCODataLoader
-from utils.utils import BoxCoder
 
 
 
 dataset = CustomCOCODataset(root_folder="data/val2017",
                             annotation_json="data/annotations/instances_val2017.json")
 print('Images in dataset:',len(dataset))
-
-
-
-batch_size = 45
 
 train_size = int(0.3 * len(dataset))
 val_size = int(0.1 * len(dataset))
@@ -31,10 +22,8 @@ torch.random.manual_seed(1)
 train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,[train_size,val_size,test_size])
 
 
-
-
-
 #config
+batch_size = 45
 bbone2rpn_channels = 64
 out_channels = 256
 sizes = ((16, 32, 64), ) 
@@ -97,7 +86,7 @@ if __name__=='__main__':
         running_loss = 0.0
         running_val_loss = 0.0
         
-        for i, data in tqdm(enumerate(train_dataloader),total=len(train_dataloader)):
+        for i, data in enumerate(train_dataloader):
             rpn.train()
 
             img,truth = data # Sent to device inside forward pass
@@ -111,7 +100,7 @@ if __name__=='__main__':
             optimizer.step() # adjust weights
 
             running_loss += loss.item()
-        print('TRAIN LOSS:',running_loss/len(train_dataloader))    
+        print('EPOCH: ', epoch,'; TRAIN LOSS:',running_loss/len(train_dataloader))    
         #scheduler.step()
         loss_per_epoch.append(running_loss/len(train_dataloader))
 
@@ -124,7 +113,7 @@ if __name__=='__main__':
 
                 running_val_loss += val_loss.item()
                 
-            print('VAL LOSS',running_val_loss/len(val_dataloader))
+            print('EPOCH: ', epoch,'; VAL LOSS',running_val_loss/len(val_dataloader))
             val_loss_per_epoch.append(running_val_loss/len(val_dataloader))
 
 
