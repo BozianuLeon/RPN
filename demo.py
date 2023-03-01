@@ -30,9 +30,7 @@ print('\ttrain / val / test size : ',train_size,'/',val_size,'/',test_size)
 torch.random.manual_seed(1)
 train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,[train_size,val_size,test_size])
 
-train_init_dataloader = CustomCOCODataLoader(train_dataset,batch_size,num_workers=4,shuffle=True)
 
-val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=4,shuffle=True)
 
 
 
@@ -79,12 +77,12 @@ rpn = RPNStructure(
 )
 
 
-
+train_init_dataloader = CustomCOCODataLoader(train_dataset,batch_size,num_workers=0,shuffle=True)
+val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=0,shuffle=True)
+train_dataloader = train_init_dataloader.loader()
+val_dataloader = val_init_dataloader.loader()
 
 if __name__=='__main__':
-    train_dataloader = train_init_dataloader.loader()
-    val_dataloader = val_init_dataloader.loader()
-
 
     #training loop
     n_epochs = 10
@@ -103,7 +101,7 @@ if __name__=='__main__':
 
             img,truth = data
             img = img.to(device, non_blocking=True)
-            truth = truth.to(device, non_blocking=True)
+            truth = truth#.to(device, non_blocking=True) #cant send list of dicts to gpu 
 
             optimizer.zero_grad(set_to_none=True) #reduced memory operations
 

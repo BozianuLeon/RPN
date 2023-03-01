@@ -55,6 +55,10 @@ class SimpleRPN(nn.Module):
         return logits, bbox_reg
 
 
+
+
+
+
 class SimplerRPN(nn.Module):
     def __init__(
         self, 
@@ -83,9 +87,9 @@ class SimplerRPN(nn.Module):
 class SharedConvolutionalLayers(nn.Module):
     def __init__(self, out_channels):
         super().__init__()
-        self.conv1 = torch.nn.Conv2d(3,48,kernel_size=3,padding=1)
-        self.conv2 = torch.nn.Conv2d(48,128,kernel_size=3,padding=1)
-        self.conv3 = torch.nn.Conv2d(128,out_channels,kernel_size=3,padding=1)
+        self.conv1 = torch.nn.Conv2d(3,48,kernel_size=3,stride=1,padding=1)
+        self.conv2 = torch.nn.Conv2d(48,128,kernel_size=3,stride=2,padding=1)
+        self.conv3 = torch.nn.Conv2d(128,out_channels,kernel_size=3,stride=2,padding=1)
 
     def forward(self,x):
         shared_output = []
@@ -96,6 +100,12 @@ class SharedConvolutionalLayers(nn.Module):
         shared_output.append(x)
 
         return shared_output
+
+
+
+
+
+
 
 
 
@@ -150,8 +160,8 @@ class RPNStructure(nn.Module):
         self.anchor_generator = AnchorGenerator(self.sizes, self.aspect_ratios)
         self.num_anchors_per_cell = self.anchor_generator.num_anchors_per_location()[0]
         self.box_coding = BoxCoder(weights=(1.,1.,1.,1.))
-        print('anchor utils method', self.anchor_generator.num_anchors_per_location(),self.anchor_generator.num_anchors_per_location()[0])
-        print('old method (wrong)',len(sizes)*len(aspect_ratios))
+        #print('anchor utils method', self.anchor_generator.num_anchors_per_location(),self.anchor_generator.num_anchors_per_location()[0])
+        #print('old method (wrong)',len(sizes)*len(aspect_ratios))
 
         # we need to cover the case where we are loading a model in! in this case it does not need init args
         if isinstance(model,type):
@@ -160,8 +170,11 @@ class RPNStructure(nn.Module):
         else:
             self.head = model
             self.head.to(device)
-        self.shared_network = shared_layers(in_channels).to(device)
-        
+
+        if isinstance(shared_layers,type):
+            self.shared_network = shared_layers(in_channels).to(device)
+        else:
+            self.shared_network = shared_layers
         
         #training
         self.box_similarity = box_iou
@@ -430,14 +443,17 @@ class RPNStructure(nn.Module):
             losses (Dict[str,Tensor]): the losses from the model in training (empty in test)
 
         '''
-
-        feature_maps = self.shared_network(batch_of_images)
+        with torch.no_grad():
+            feature_maps = self.shared_network(batch_of_images)
+            print('feature maps',len(feature_maps),feature_maps[0].shape)
         
         objectness, pred_bbox_deltas = self.head(feature_maps)
+        print('objectness',len(objectness),objectness[0].shape)
+        print('pred_bbox_deltas',len(pred_bbox_deltas),pred_bbox_deltas[0].shape)
         image_shapes = [image.shape[-2:] for image in batch_of_images]
         image_list = ImageList(batch_of_images,image_shapes)
         anchors = self.anchor_generator(image_list,feature_maps)
-        #print('Anchors:',len(anchors),anchors[0].shape)
+        print('Anchors:',len(anchors),anchors[0].shape)
 
         num_images_in_batch = len(anchors)
         num_anchors_per_level = [o[0].numel() for o in objectness]
