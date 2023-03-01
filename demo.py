@@ -35,7 +35,6 @@ train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset
 
 
 #config
-# in_channels = 256
 bbone2rpn_channels = 64
 out_channels = 256
 sizes = ((16, 32, 64), ) 
@@ -50,7 +49,7 @@ bg_iou_threshold = 0.2
 batch_size_per_image = 256
 positive_fraction = 0.5
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print('device: ',device)
+print('Using device: ',device)
 
 
 rpn = RPNStructure(
@@ -77,12 +76,14 @@ rpn = RPNStructure(
 )
 
 
-train_init_dataloader = CustomCOCODataLoader(train_dataset,batch_size,num_workers=0,shuffle=True)
-val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=0,shuffle=True)
-train_dataloader = train_init_dataloader.loader()
-val_dataloader = val_init_dataloader.loader()
+
 
 if __name__=='__main__':
+
+    train_init_dataloader = CustomCOCODataLoader(train_dataset,batch_size,num_workers=0,shuffle=True)
+    val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=0,shuffle=True)
+    train_dataloader = train_init_dataloader.loader()
+    val_dataloader = val_init_dataloader.loader()
 
     #training loop
     n_epochs = 10
@@ -99,14 +100,11 @@ if __name__=='__main__':
         for i, data in tqdm(enumerate(train_dataloader),total=len(train_dataloader)):
             rpn.train()
 
-            img,truth = data
-            img = img.to(device, non_blocking=True)
-            truth = truth#.to(device, non_blocking=True) #cant send list of dicts to gpu 
+            img,truth = data # Sent to device inside forward pass
 
-            optimizer.zero_grad(set_to_none=True) #reduced memory operations
+            optimizer.zero_grad(set_to_none=True) # Reduce memory operations
 
-            # Make predictions for this batch and compute losses + gradients
-            boxes, scores, losses = rpn(img, truth)
+            boxes, scores, losses = rpn(img, truth) # Make predictions for this batch and compute losses + gradients
 
             loss = losses["loss_clf"] + factor_C * losses["loss_reg"]
             loss.backward()  # init backprop
