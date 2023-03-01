@@ -7,3 +7,4 @@ utils/__pycache__/
 *.pth
 *.out
 *-loss-list*
+demo_images/
