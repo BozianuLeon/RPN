@@ -10,7 +10,8 @@ from collections import OrderedDict
 
 
 def move_dev(
-    tensor: Union[torch.Tensor, tuple, list, dict], dev: Union[str, torch.device]
+    tensor: Union[torch.Tensor, tuple, list, dict], 
+    dev: Union[str, torch.device]
 ) -> Union[torch.Tensor, tuple, list, dict]:
     """
     MATTSTOOLS
@@ -27,21 +28,27 @@ def move_dev(
         dev = sel_device(dev)
 
     if isinstance(tensor, tuple):
-        return tuple(t.to(dev) for t in tensor)
+        #return tuple(t.to(dev) for t in tensor)
+        return tuple(move_dev(t,dev) for t in tensor)
     elif isinstance(tensor, list):
-        return [t.to(dev) for t in tensor]
+        #return [t.to(dev) for t in tensor]
+        return [move_dev(t,dev) for t in tensor]
     elif isinstance(tensor, dict):
-        return {t: tensor[t].to(dev) for t in tensor}
+        #return {t: tensor[t].to(dev) for t in tensor}
+        return {t: move_dev(tensor[t],dev) for t in tensor}
+    elif isinstance(tensor,str):
+        return tensor
     else:
         return tensor.to(dev)
 
 
 
 def sel_device(dev: Union[str, torch.device]) -> torch.device:
-    """Returns a pytorch device given a string (or a device)
-
+    """
+    Returns a pytorch device given a string (or a device)
     - giving cuda or gpu will run a hardware check first
     """
+
     # Not from config, but when device is specified already
     if isinstance(dev, torch.device):
         return dev
