@@ -2,18 +2,19 @@ import torch
 import torchvision
 
 from matplotlib import pyplot as plt
+import time
 import pickle
 
 from model.rpn import SimpleRPN, SharedConvolutionalLayers, RPNStructure
 from utils.dataset import CustomCOCODataset, CustomCOCODataLoader
 
 # Get data
-dataset = CustomCOCODataset(root_folder="data/val2017",
-                            annotation_json="data/annotations/instances_val2017.json")
+dataset = CustomCOCODataset(root_folder="work/data/val2017",
+                            annotation_json="work/data/annotations/instances_val2017.json")
 print('Images in dataset:',len(dataset))
 
-train_size = int(0.3 * len(dataset))
-val_size = int(0.1 * len(dataset))
+train_size = int(0.5 * len(dataset))
+val_size = int(0.2 * len(dataset))
 test_size = len(dataset) - train_size -val_size
 print('\ttrain / val / test size : ',train_size,'/',val_size,'/',test_size)
 
@@ -74,13 +75,14 @@ if __name__=='__main__':
     val_dataloader = val_init_dataloader.loader()
 
     #training loop
-    n_epochs = 10
+    n_epochs = 1
     factor_C = 1.5
     optimizer = torch.optim.SGD(rpn.head.parameters(), lr=0.001, momentum=0.9)
     #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patence=10,threshold=0.0001,threshold_mode='abs')
 
     loss_per_epoch = []
     val_loss_per_epoch = []
+    t_start = time.perf_counter()
     for epoch in range(n_epochs):
         running_loss = 0.0
         running_val_loss = 0.0
@@ -114,16 +116,21 @@ if __name__=='__main__':
                 
             print('EPOCH: ', epoch,'; VAL LOSS',running_val_loss/len(val_dataloader))
             val_loss_per_epoch.append(running_val_loss/len(val_dataloader))
+        
+        t_end = time.perf_counter()
+        print('EPOCH duration: ', t_end-t_start)
 
 
-        #https://pytorch.org/tutorials/beginner/saving_loading_models.html
-        save_at = '/Users/leonbozianu/work/phd/RPN/model/model-{}e.pth'.format(n_epochs)
-        torch.save(rpn.head.state_dict(), save_at)
 
 
-        with open("train-loss-list.pkl", "wb") as fp:
-            pickle.dump(loss_per_epoch,fp)
+    #https://pytorch.org/tutorials/beginner/saving_loading_models.html
+    save_at = '/Users/leonbozianu/work/phd/RPN/model/model-{}e.pth'.format(n_epochs)
+    torch.save(rpn.head.state_dict(), save_at)
 
-        with open("val-loss-list.pkl", "wb") as fp:
-            pickle.dump(val_loss_per_epoch,fp)
+
+    with open("train-loss-list.pkl", "wb") as fp:
+        pickle.dump(loss_per_epoch,fp)
+
+    with open("val-loss-list.pkl", "wb") as fp:
+        pickle.dump(val_loss_per_epoch,fp)
 
