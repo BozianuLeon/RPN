@@ -109,11 +109,13 @@ class CustomCOCODataLoader(DataLoader):
                  dataset,
                  batch_size,
                  shuffle,
-                 num_workers
+                 drop_last=False,
+                 num_workers=0
     ):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.drop_last = drop_last
         self.num_workers = num_workers
 
     
@@ -150,6 +152,7 @@ class CustomCOCODataLoader(DataLoader):
         return DataLoader(dataset=self.dataset,
                           batch_size=self.batch_size,
                           shuffle=self.shuffle,
+                          drop_last=self.drop_last,
                           num_workers=self.num_workers,
                           collate_fn=self.custom_collate_fn)
 

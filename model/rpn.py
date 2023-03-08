@@ -43,6 +43,13 @@ class SimpleRPN(nn.Module):
         self.cls_logits = nn.Conv2d(out_channels, num_anchors, kernel_size=1, stride=1)
         self.bbox_deltas = nn.Conv2d(out_channels, num_anchors * 4,kernel_size=1, stride=1)
 
+        # randomly initialise all new layers drawing weights from zero-mean Gaussian (from paper)
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                torch.nn.init.normal_(layer.weight, std=0.01)  # type: ignore[arg-type]
+                if layer.bias is not None:
+                    torch.nn.init.constant_(layer.bias, 0)  # type: ignore[arg-type]
+
     def forward(self, img_tensor):
         logits = []
         bbox_reg = []
@@ -288,7 +295,7 @@ class RPNStructure(nn.Module):
         #print('objectness.shape',objectness.shape)
 
         #give anchors in each level an index referring to the level they belong to (should be 1 for us)
-        levels = [torch.full((n,), idx, dtype=torch.int64) for idx, n in enumerate(num_anchors_per_level)]
+        levels = [torch.full((n,), idx, dtype=torch.int64,device=self.device) for idx, n in enumerate(num_anchors_per_level)]
         #print('levels\n',len(levels),'\n',levels)
         levels = torch.cat(levels, 0)
         #print('levels\n',len(levels),'\n',levels)
@@ -392,6 +399,7 @@ class RPNStructure(nn.Module):
         objectness_loss = F.binary_cross_entropy_with_logits(
             objectness[sampled_inds],
             labels[sampled_inds],
+            reduction='mean',
         )
 
         # F1 Loss on box parameters (not IoU loss)
@@ -401,18 +409,20 @@ class RPNStructure(nn.Module):
         #discuss 'mean' vs 'sum' reduction!
         #also divided by the number of sampled inds! (256 i think)
         
-        # box_loss = F.smooth_l1_loss(
-        #     pred_bbox_deltas[sampled_pos_inds],
-        #     regression_targets[sampled_pos_inds],
-        #     beta = 1/9,
-        #     reduction='sum'
-        # ) / (sampled_inds.numel())
-        box_loss = F.l1_loss(
+        box_loss = F.smooth_l1_loss(
             pred_bbox_deltas[sampled_pos_inds],
             regression_targets[sampled_pos_inds],
-            reduction='sum'
-        ) / (sampled_inds.numel())
+            beta = 1/9,
+            reduction='mean'
+        ) 
+        # box_loss = F.l1_loss(
+        #     pred_bbox_deltas[sampled_pos_inds],
+        #     regression_targets[sampled_pos_inds],
+        #     reduction='sum'
+        # ) / (sampled_inds.numel())
+        print(objectness_loss.item(), 'VS', box_loss.item())
 
+        # add penalty loss?
         return objectness_loss, box_loss
 
 
