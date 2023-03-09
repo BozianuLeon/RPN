@@ -10,12 +10,12 @@ from model.rpn import SimpleRPN, SharedConvolutionalLayers, SharedConvLayersVGG,
 from utils.dataset import CustomCOCODataset, CustomCOCODataLoader
 
 # Get data
-dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/val2017",
-                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_val2017.json")
+dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/train2017",
+                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_train2017.json")
 print('Images in dataset:',len(dataset))
 
-train_size = int(0.9 * len(dataset))
-val_size = int(0.05 * len(dataset))
+train_size = int(0.05 * len(dataset))
+val_size = int(0.025 * len(dataset))
 test_size = len(dataset) - train_size - val_size
 print('\ttrain / val / test size : ',train_size,'/',val_size,'/',test_size)
 
@@ -24,15 +24,15 @@ train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset
 
 
 #config
-batch_size = 64
+batch_size = 16
 n_workers = 2
 bbone2rpn_channels = 64
-out_channels = 256
+out_channels = 128
 sizes = ((16, 32, 64), ) 
 #sizes = ((32, ), (64, ), (128, )) #this config is for when multiple feature maps are passed - not the case for us
 aspect_ratios = ((0.5, 1.0, 2.0), )
-pre_nms_top_n = {"training": 100, "testing": 40}
-post_nms_top_n = {"training": 40, "testing": 10}
+pre_nms_top_n = {"training": 1000, "testing": 400}
+post_nms_top_n = {"training": 100, "testing": 50}
 score_threshold = 0.2
 nms_threshold = 0.5
 fg_iou_threshold = 0.7
@@ -77,13 +77,13 @@ if __name__=='__main__':
     val_dataloader = val_init_dataloader.loader()
 
     #training loop
-    n_epochs = 25
-    factor_C = 1.5
+    n_epochs = 15
+    factor_C = 0.35#1.1
   
     #optimizer = torch.optim.SGD(rpn.head.parameters(), lr=0.01, momentum=0.9)
     params = list(rpn.head.parameters()) + list(rpn.shared_network.parameters())
-    optimizer = torch.optim.SGD(params, lr=0.01, momentum=0.9)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patence=10,threshold=0.0001,threshold_mode='abs') #https://hasty.ai/docs/mp-wiki/scheduler/reducelronplateau
+    optimizer = torch.optim.Adam(params, lr=0.01)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patience=5,threshold=0.0001,threshold_mode='abs') #https://hasty.ai/docs/mp-wiki/scheduler/reducelronplateau
 
     loss_per_epoch = []
     tr_cls_loss, tr_reg_loss = [], []
@@ -132,6 +132,7 @@ if __name__=='__main__':
         
         t_end = time.perf_counter()
         print('EPOCH duration: {:.3f}s'.format(t_end-t_start))
+        del img, truth, val_img, val_truth
 
 
     path = '/home/users/b/bozianu/work/logs/'+str(time.strftime('%H%M%S'))

@@ -12,12 +12,12 @@ from utils.dataset import CustomCOCODataset, CustomCOCODataLoader
 
 
 
-dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/val2017",
-                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_val2017.json")
+dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/train2017",
+                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_train2017.json")
 print('Images in dataset:',len(dataset))
 
-train_size = int(0.5 * len(dataset))
-val_size = int(0.25 * len(dataset))
+train_size = int(0.1 * len(dataset))
+val_size = int(0.05 * len(dataset))
 test_size = len(dataset) - train_size - val_size
 print('\ttrain / val / test size : ',train_size,'/',val_size,'/',test_size)
 
@@ -32,8 +32,8 @@ out_channels = 256
 sizes = ((16, 32, 128), ) 
 #sizes = ((32, ), (64, ), (128, )) #this config is for when multiple feature maps are passed - not the case for us
 aspect_ratios = ((0.5, 1.0, 2.0), )
-pre_nms_top_n = 40
-post_nms_top_n = 40
+pre_nms_top_n = {"training": 100, "testing": 40}
+post_nms_top_n = {"training": 40, "testing": 10}
 score_threshold = 0.2
 nms_threshold = 0.5
 fg_iou_threshold = 0.55
@@ -51,7 +51,7 @@ val_dataloader = val_init_dataloader.loader()
 
 #for a trained model to load in we must initialise anchor generator outside
 # with same parameters as before
-load_model_path = '/home/users/b/bozianu/work/logs/130153/model-50e.pth'
+load_model_path = '/home/users/b/bozianu/work/logs/183731/model-15e.pth'
 save_at = os.path.dirname(load_model_path)
 anchor_generator = torchvision.models.detection.anchor_utils.AnchorGenerator(sizes, aspect_ratios)
 num_anchors_per_cell = anchor_generator.num_anchors_per_location()[0]
@@ -86,7 +86,7 @@ rpn = RPNStructure(
 
 
 
-index,(img,truth) = next(enumerate(val_dataloader))
+index,(img,truth) = next(enumerate(train_dataloader))
 rpn.eval()
 boxes1, scores1, losses1 = rpn(img)
 
