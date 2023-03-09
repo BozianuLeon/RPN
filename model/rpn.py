@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 
 import torch
+import torchvision
 import torch.nn as nn
 from torch.nn import functional as F
 from torchvision.models.detection.image_list import ImageList
@@ -43,6 +44,13 @@ class SimpleRPN(nn.Module):
         self.cls_logits = nn.Conv2d(out_channels, num_anchors, kernel_size=1, stride=1)
         self.bbox_deltas = nn.Conv2d(out_channels, num_anchors * 4,kernel_size=1, stride=1)
 
+        # randomly initialise all new layers drawing weights from zero-mean Gaussian (from paper)
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                torch.nn.init.normal_(layer.weight, std=0.01)  # type: ignore[arg-type]
+                if layer.bias is not None:
+                    torch.nn.init.constant_(layer.bias, 0)  # type: ignore[arg-type]
+
     def forward(self, img_tensor):
         logits = []
         bbox_reg = []
@@ -83,7 +91,8 @@ class SimplerRPN(nn.Module):
 
 
 
-
+#investigate the feature maps we're sending to the head, maybe we're just taking the top guy? 
+#ie the very first feature map and trying to do everything there?
 class SharedConvolutionalLayers(nn.Module):
     def __init__(self, out_channels):
         super().__init__()
@@ -102,6 +111,25 @@ class SharedConvolutionalLayers(nn.Module):
         return shared_output
 
 
+
+
+class SharedConvLayersVGG(nn.Module):
+    def __init__(self,out_channels,out_size=64):
+        super().__init__()
+        vgg16 = torchvision.models.vgg16(weights="VGG16_Weights.DEFAULT").requires_grad_(False)
+        modules = list(vgg16.children())[:-2]
+        self.vgg16_back = nn.Sequential(*modules)
+        module_list = [torch.nn.Conv2d(in_channels=512,out_channels=out_channels,kernel_size=3,stride=1,padding=1),
+                       torch.nn.ReLU(inplace=True),
+                       torch.nn.AdaptiveAvgPool2d(output_size=(out_size, out_size))]
+        self.share_conv_layers = nn.Sequential(*module_list)
+
+    def forward(self,x):
+        shared_output = []
+        h = self.vgg16_back(x)
+        out = self.share_conv_layers(h)
+        shared_output.append(out)
+        return shared_output
 
 
 
@@ -187,14 +215,23 @@ class RPNStructure(nn.Module):
         self.fg_bg_sampler = BalancedPositiveNegativeSampler(batch_size_per_image, positive_fraction)
 
         #inference
-        self._pre_nms_top_n = pre_nms_top_n #for now just one topN for both train+test
+        self._pre_nms_top_n = pre_nms_top_n 
         self.nms_thresh = nms_threshold
-        self._post_nms_top_n = post_nms_top_n #for now just one topN for both train+test
+        self._post_nms_top_n = post_nms_top_n 
         self.min_box_size = 1e-3
         self.score_thresh = score_threshold
 
         self.device = device
 
+    def pre_nms_top_n(self):
+        if self.training:
+            return self._pre_nms_top_n["training"]
+        return self._pre_nms_top_n["testing"]
+
+    def post_nms_top_n(self):
+        if self.training:
+            return self._post_nms_top_n["training"]
+        return self._post_nms_top_n["testing"]
 
     def permute_and_flatten(
         self,
@@ -256,7 +293,7 @@ class RPNStructure(nn.Module):
         anchor_idx_offset = 0
         for o in  objectness.split(num_anchors_per_level, dim=1):
             anchors_in_level = o.shape[1]
-            pre_nms_top_n = min(self._pre_nms_top_n, anchors_in_level) # changed from self.pre_nms_top_n()
+            pre_nms_top_n = min(self.pre_nms_top_n(), anchors_in_level) 
             _, anchor_idx = o.topk(pre_nms_top_n, dim=1)
             top_n_idx.append(anchor_idx + anchor_idx_offset)
             anchor_idx_offset += anchors_in_level
@@ -288,7 +325,7 @@ class RPNStructure(nn.Module):
         #print('objectness.shape',objectness.shape)
 
         #give anchors in each level an index referring to the level they belong to (should be 1 for us)
-        levels = [torch.full((n,), idx, dtype=torch.int64) for idx, n in enumerate(num_anchors_per_level)]
+        levels = [torch.full((n,), idx, dtype=torch.int64,device=self.device) for idx, n in enumerate(num_anchors_per_level)]
         #print('levels\n',len(levels),'\n',levels)
         levels = torch.cat(levels, 0)
         #print('levels\n',len(levels),'\n',levels)
@@ -319,7 +356,7 @@ class RPNStructure(nn.Module):
             boxes, scores, level = boxes[keep], scores[keep], level[keep]
 
             keep = box_ops.batched_nms(boxes, scores, level, self.nms_thresh)
-            keep = keep[:self._post_nms_top_n]
+            keep = keep[:self.post_nms_top_n()]
 
             boxes, scores = boxes[keep], scores[keep]
 
@@ -376,13 +413,16 @@ class RPNStructure(nn.Module):
         # Function to calculate the loss from cls and reg model outputs
         # Importantly we also use the fg_bg_sampler to only take into account self.batch_size_per_image
         # bbox proposals per calculation
+        #across the batch of images we actually turn the fg/bg indices into a really long list sampled_inds (and sampled_[]_inds)
+        #the torch.nonzero finds the indices of the elements that are different from 0
+        #then both FG and BG contribute to L_CLS but only FG included in L_REG
 
         sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
         sampled_pos_inds = torch.nonzero(torch.cat(sampled_pos_inds,dim=0)).squeeze(1)
         sampled_neg_inds = torch.nonzero(torch.cat(sampled_neg_inds,dim=0)).squeeze(1)
 
         sampled_inds = torch.cat([sampled_pos_inds,sampled_neg_inds],dim=0)
-        
+
         objectness = objectness.flatten()
         labels = torch.cat(labels,dim=0)
         regression_targets = torch.cat(regression_targets,dim=0)
@@ -392,6 +432,7 @@ class RPNStructure(nn.Module):
         objectness_loss = F.binary_cross_entropy_with_logits(
             objectness[sampled_inds],
             labels[sampled_inds],
+            reduction='mean',
         )
 
         # F1 Loss on box parameters (not IoU loss)
@@ -401,18 +442,19 @@ class RPNStructure(nn.Module):
         #discuss 'mean' vs 'sum' reduction!
         #also divided by the number of sampled inds! (256 i think)
         
-        # box_loss = F.smooth_l1_loss(
-        #     pred_bbox_deltas[sampled_pos_inds],
-        #     regression_targets[sampled_pos_inds],
-        #     beta = 1/9,
-        #     reduction='sum'
-        # ) / (sampled_inds.numel())
-        box_loss = F.l1_loss(
+        box_loss = F.smooth_l1_loss(
             pred_bbox_deltas[sampled_pos_inds],
             regression_targets[sampled_pos_inds],
+            beta = 1/9,
             reduction='sum'
-        ) / (sampled_inds.numel())
+        ) / (sampled_pos_inds.numel())
+        # box_loss = F.l1_loss(
+        #     pred_bbox_deltas[sampled_pos_inds],
+        #     regression_targets[sampled_pos_inds],
+        #     reduction='sum'
+        # ) / (sampled_inds.numel())
 
+        # add penalty loss?
         return objectness_loss, box_loss
 
 
@@ -447,13 +489,11 @@ class RPNStructure(nn.Module):
 
         batch_of_images = move_dev(batch_of_images,self.device)
 
-        with torch.no_grad():
-            feature_maps = self.shared_network(batch_of_images)
-            #print('feature maps',len(feature_maps),feature_maps[0].shape)
+        feature_maps = self.shared_network(batch_of_images)
+        #print('feature maps',len(feature_maps),feature_maps[0].shape)
         
         objectness, pred_bbox_deltas = self.head(feature_maps)
-        # print('objectness',len(objectness),objectness[0].shape)
-        # print('pred_bbox_deltas',len(pred_bbox_deltas),pred_bbox_deltas[0].shape)
+
         image_shapes = [image.shape[-2:] for image in batch_of_images]
         image_list = ImageList(batch_of_images,image_shapes)
         anchors = self.anchor_generator(image_list,feature_maps)
@@ -462,12 +502,11 @@ class RPNStructure(nn.Module):
         num_anchors_per_level = [o[0].numel() for o in objectness]
 
         objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
-        #print('Model outputs:',objectness.shape,pred_bbox_deltas.shape)
 
         proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
         proposals = proposals.view(num_images_in_batch, -1, 4)
         
-        final_boxes, final_scores = self.filter_proposals(proposals, objectness, num_anchors_per_level, image_shapes)
+        final_boxes, final_scores = self.filter_proposals(proposals, objectness.detach(), num_anchors_per_level, image_shapes)
         
         losses = {}
         if self.training or (batch_of_anns is not None):
