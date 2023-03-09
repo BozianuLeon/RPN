@@ -215,14 +215,23 @@ class RPNStructure(nn.Module):
         self.fg_bg_sampler = BalancedPositiveNegativeSampler(batch_size_per_image, positive_fraction)
 
         #inference
-        self._pre_nms_top_n = pre_nms_top_n #for now just one topN for both train+test
+        self._pre_nms_top_n = pre_nms_top_n 
         self.nms_thresh = nms_threshold
-        self._post_nms_top_n = post_nms_top_n #for now just one topN for both train+test
+        self._post_nms_top_n = post_nms_top_n 
         self.min_box_size = 1e-3
         self.score_thresh = score_threshold
 
         self.device = device
 
+    def pre_nms_top_n(self):
+        if self.training:
+            return self._pre_nms_top_n["training"]
+        return self._pre_nms_top_n["testing"]
+
+    def post_nms_top_n(self):
+        if self.training:
+            return self._post_nms_top_n["training"]
+        return self._post_nms_top_n["testing"]
 
     def permute_and_flatten(
         self,
@@ -284,7 +293,7 @@ class RPNStructure(nn.Module):
         anchor_idx_offset = 0
         for o in  objectness.split(num_anchors_per_level, dim=1):
             anchors_in_level = o.shape[1]
-            pre_nms_top_n = min(self._pre_nms_top_n, anchors_in_level) # changed from self.pre_nms_top_n()
+            pre_nms_top_n = min(self.pre_nms_top_n(), anchors_in_level) 
             _, anchor_idx = o.topk(pre_nms_top_n, dim=1)
             top_n_idx.append(anchor_idx + anchor_idx_offset)
             anchor_idx_offset += anchors_in_level
@@ -347,7 +356,7 @@ class RPNStructure(nn.Module):
             boxes, scores, level = boxes[keep], scores[keep], level[keep]
 
             keep = box_ops.batched_nms(boxes, scores, level, self.nms_thresh)
-            keep = keep[:self._post_nms_top_n]
+            keep = keep[:self.post_nms_top_n()]
 
             boxes, scores = boxes[keep], scores[keep]
 

@@ -14,8 +14,8 @@ dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/val2017
                             annotation_json="/home/users/b/bozianu/work/data/annotations/instances_val2017.json")
 print('Images in dataset:',len(dataset))
 
-train_size = int(0.5 * len(dataset))
-val_size = int(0.25 * len(dataset))
+train_size = int(0.9 * len(dataset))
+val_size = int(0.05 * len(dataset))
 test_size = len(dataset) - train_size - val_size
 print('\ttrain / val / test size : ',train_size,'/',val_size,'/',test_size)
 
@@ -28,15 +28,15 @@ batch_size = 64
 n_workers = 2
 bbone2rpn_channels = 64
 out_channels = 256
-sizes = ((16, 32, 128), ) 
+sizes = ((16, 32, 64), ) 
 #sizes = ((32, ), (64, ), (128, )) #this config is for when multiple feature maps are passed - not the case for us
 aspect_ratios = ((0.5, 1.0, 2.0), )
-pre_nms_top_n = 40
-post_nms_top_n = 40
+pre_nms_top_n = {"training": 100, "testing": 40}
+post_nms_top_n = {"training": 40, "testing": 10}
 score_threshold = 0.2
 nms_threshold = 0.5
-fg_iou_threshold = 0.55
-bg_iou_threshold = 0.2
+fg_iou_threshold = 0.7
+bg_iou_threshold = 0.3
 batch_size_per_image = 256
 positive_fraction = 0.5
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -72,18 +72,18 @@ rpn = RPNStructure(
 if __name__=='__main__':
 
     train_init_dataloader = CustomCOCODataLoader(train_dataset,batch_size,num_workers=n_workers,shuffle=True,drop_last=True)
-    val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=n_workers,shuffle=True,drop_last=True)
+    val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=n_workers,shuffle=True,drop_last=False)
     train_dataloader = train_init_dataloader.loader()
     val_dataloader = val_init_dataloader.loader()
 
     #training loop
-    n_epochs = 1
+    n_epochs = 25
     factor_C = 1.5
   
     #optimizer = torch.optim.SGD(rpn.head.parameters(), lr=0.01, momentum=0.9)
     params = list(rpn.head.parameters()) + list(rpn.shared_network.parameters())
     optimizer = torch.optim.SGD(params, lr=0.01, momentum=0.9)
-    #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patence=10,threshold=0.0001,threshold_mode='abs')
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patence=10,threshold=0.0001,threshold_mode='abs')
 
     loss_per_epoch = []
     tr_cls_loss, tr_reg_loss = [], []
