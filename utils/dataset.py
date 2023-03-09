@@ -2,7 +2,6 @@ import torch
 from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from torchvision.models.detection.image_list import ImageList
 
 import numpy as np
 import os
@@ -102,6 +101,74 @@ class CustomCOCODataset(Dataset):
         else:
             im.close()
             return -1
+
+
+
+
+
+
+class CustomToyDataset(Dataset):
+    '''
+    Preparing toy data dataset, result in same format as COCO dataset
+    '''
+    def __init__(self,annotation_json):
+
+        with open(annotation_json) as json_file:
+            annotations = json.load(json_file)
+        self.annotations = annotations
+        self.ids = torch.arange(len(self.annotations))
+
+    def __getitem__(self, index):
+        annotations_i = self.annotations[str(index)]
+        path = annotations_i["image"]["img_path"]
+        img = Image.open(path).convert('L')
+        img.show()
+        print(img.mode)
+
+        n_objs = annotations_i["annotations"]["n_gausses"]
+
+        tensor_boxes = torch.as_tensor(annotations_i["annotations"]["bboxes"])
+        boxes = self.xywh2xyxy(tensor_boxes)
+        labels = torch.ones((n_objs,),dtype=torch.int32)
+
+        img_tensor, scaled_boxes = self.prepare_image(img,boxes)
+
+        my_annotations = {}
+        my_annotations["image_id"] = index
+        my_annotations["path"] = path
+        my_annotations["boxes"] = scaled_boxes
+        my_annotations["labels"] = labels
+
+        return img_tensor, my_annotations
+    
+    def __len__(self):
+        return len(self.ids)
+
+    def xywh2xyxy(self,x):
+        x, y, w, h = x.unbind(-1)
+        b = [x,y,x+w,y+h]
+        return torch.stack(b, dim=-1)
+    
+    def prepare_image(self,
+                      img,
+                      boxes,
+                      size=(256,256)
+    ):
+        
+        scaled_boxes = boxes
+        scaled_boxes[:,[0,2]] = (size[0]*(boxes[:,[0,2]]/img.size[0]))
+        scaled_boxes[:,[1,3]] = (size[1]*(boxes[:,[1,3]]/img.size[1]))   
+
+        resize_tens = transforms.Compose([transforms.Resize(size),
+                                       transforms.ToTensor()])
+        scaled_img = resize_tens(img)
+        return scaled_img, scaled_boxes
+
+
+
+
+
+
 
 
 class CustomCOCODataLoader(DataLoader):
