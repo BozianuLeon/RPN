@@ -83,7 +83,7 @@ if __name__=='__main__':
     #optimizer = torch.optim.SGD(rpn.head.parameters(), lr=0.01, momentum=0.9)
     params = list(rpn.head.parameters()) + list(rpn.shared_network.parameters())
     optimizer = torch.optim.SGD(params, lr=0.01, momentum=0.9)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patence=10,threshold=0.0001,threshold_mode='abs')
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patence=10,threshold=0.0001,threshold_mode='abs') #https://hasty.ai/docs/mp-wiki/scheduler/reducelronplateau
 
     loss_per_epoch = []
     tr_cls_loss, tr_reg_loss = [], []
@@ -112,7 +112,7 @@ if __name__=='__main__':
             tr_l_reg += losses["loss_reg"].detach().item()
 
         print('EPOCH: {} \t; TRAIN LOSS: {}'.format(epoch,running_loss/len(train_dataloader)))  
-        #scheduler.step()
+        
         loss_per_epoch.append(running_loss/len(train_dataloader))
         tr_cls_loss.append(tr_l_cls/len(train_dataloader))
         tr_reg_loss.append(factor_C*tr_l_reg/len(train_dataloader))
@@ -127,6 +127,7 @@ if __name__=='__main__':
                 running_val_loss += val_loss.detach().item() 
 
             print('EPOCH: {} \t; VAL LOSS: {}'.format(epoch,running_val_loss/len(val_dataloader)))
+            scheduler.step(running_val_loss/len(val_dataloader))
             val_loss_per_epoch.append(running_val_loss/len(val_dataloader))
         
         t_end = time.perf_counter()
