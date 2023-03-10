@@ -10,12 +10,12 @@ from model.rpn import SimpleRPN, SharedConvolutionalLayers, SharedConvLayersVGG,
 from utils.dataset import CustomCOCODataset, CustomCOCODataLoader
 
 # Get data
-dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/train2017",
-                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_train2017.json")
+dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/val2017",
+                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_val2017.json")
 print('Images in dataset:',len(dataset))
 
-train_size = int(0.1 * len(dataset))
-val_size = int(0.05 * len(dataset))
+train_size = int(0.25 * len(dataset))
+val_size = int(0.1 * len(dataset))
 test_size = len(dataset) - train_size - val_size
 print('\ttrain / val / test size : ',train_size,'/',val_size,'/',test_size)
 
@@ -77,12 +77,12 @@ if __name__=='__main__':
     val_dataloader = val_init_dataloader.loader()
 
     #training loop
-    n_epochs = 40
-    factor_C = 0.55#1.1
+    n_epochs = 20
+    factor_C = 0.75#1.1
   
     #optimizer = torch.optim.SGD(rpn.head.parameters(), lr=0.01, momentum=0.9)
     params = list(rpn.head.parameters()) + list(rpn.shared_network.parameters())
-    optimizer = torch.optim.AdamW(params, lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01,)
+    optimizer = torch.optim.Adam(params, lr=0.01)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',factor=0.1,patience=5,threshold=0.0001,threshold_mode='abs') #https://hasty.ai/docs/mp-wiki/scheduler/reducelronplateau
 
     loss_per_epoch = []
@@ -102,7 +102,7 @@ if __name__=='__main__':
             optimizer.zero_grad(set_to_none=True) # Reduce memory operations
 
             boxes, scores, losses = rpn(img, truth) # Make predictions for this batch and compute losses + gradients
-            #print('LOSSES',losses["loss_clf"].item(),losses["loss_reg"].item())
+
             loss = losses["loss_clf"] + factor_C * losses["loss_reg"]
             loss.backward()  # init backprop
             optimizer.step() # adjust weights
@@ -144,7 +144,6 @@ if __name__=='__main__':
     # save_at = '/Users/leonbozianu/work/phd/RPN/model/model-{}e.pth'.format(n_epochs)
     torch.save(rpn.head.state_dict(), model_save_at)
 
-
     with open(path + "/train-loss-list.pkl", "wb") as fp:
         pickle.dump(loss_per_epoch,fp)
 
@@ -158,12 +157,8 @@ plt.plot(x_axis,loss_per_epoch,'--',label='training loss')
 plt.plot(x_axis,val_loss_per_epoch,'--',label='val loss')
 plt.plot(x_axis,tr_cls_loss,'--',label='training cls loss')
 plt.plot(x_axis,tr_reg_loss,'--',label='(Scaled) training reg loss')
-# plt.plot(x_axis,vl_cls_loss,'--',label='val cls loss')
-# plt.plot(x_axis,vl_reg_loss,'--',label='(Scaled) val reg loss')
 plt.title('SharedConvLayers, batch size = 32')
 plt.legend()
 plt.xlabel('epoch')
 plt.ylabel('Arbitrary Loss')
 plt.savefig(path+'/losses.png')
-
-

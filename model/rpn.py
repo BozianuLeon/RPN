@@ -96,7 +96,7 @@ class SimplerRPN(nn.Module):
 class SharedConvolutionalLayers(nn.Module):
     def __init__(self, out_channels):
         super().__init__()
-        self.conv1 = torch.nn.Conv2d(3,48,kernel_size=3,stride=1,padding=1)
+        self.conv1 = torch.nn.Conv2d(1,48,kernel_size=3,stride=1,padding=1)
         self.conv2 = torch.nn.Conv2d(48,128,kernel_size=3,stride=2,padding=1)
         self.conv3 = torch.nn.Conv2d(128,out_channels,kernel_size=3,stride=2,padding=1)
 
@@ -114,7 +114,7 @@ class SharedConvolutionalLayers(nn.Module):
 
 
 class SharedConvLayersVGG(nn.Module):
-    def __init__(self,out_channels,out_size=64):
+    def __init__(self,out_channels,out_size=256):
         super().__init__()
         vgg16 = torchvision.models.vgg16(weights="VGG16_Weights.DEFAULT").requires_grad_(False)
         modules = list(vgg16.children())[:-2]
@@ -210,7 +210,7 @@ class RPNStructure(nn.Module):
         self.proposal_matcher = Matcher(
             fg_iou_threshold,
             bg_iou_threshold,
-            allow_low_quality_matches=True
+            allow_low_quality_matches=False
         )
         self.fg_bg_sampler = BalancedPositiveNegativeSampler(batch_size_per_image, positive_fraction)
 
@@ -331,10 +331,6 @@ class RPNStructure(nn.Module):
         #print('levels\n',len(levels),'\n',levels)
         levels = levels.reshape(1, -1).expand_as(objectness)
 
-        #levels = torch.zeros_like(objectness).reshape(1,-1)
-        #print('new levels\n',len(levels),'\n',levels)
-        
-        #print('num_anchors_per_level (1 level here)',num_anchors_per_level)
 
         top_n_idx = self._get_top_n_idx(objectness, num_anchors_per_level) #pre_nms_top_n happens within
         batch_images = torch.arange(0,num_images_in_batch)
@@ -344,22 +340,24 @@ class RPNStructure(nn.Module):
         proposals = proposals[batch_idx, top_n_idx]
         levels = levels[batch_idx, top_n_idx]
 
+        objectness_prob = torch.sigmoid(objectness) # Important!
+
         final_boxes = []
         final_scores = []
-        for boxes, scores, level, image_shape in zip(proposals, objectness, levels, image_sizes):
+        for boxes, scores, level, image_shape in zip(proposals, objectness_prob, levels, image_sizes):
             boxes = box_ops.clip_boxes_to_image(boxes, image_shape)
 
             keep = box_ops.remove_small_boxes(boxes, self.min_box_size)
             boxes, scores, level = boxes[keep], scores[keep], level[keep]
-
+            #print(scores)
             keep = torch.where(scores >= self.score_thresh)[0]
             boxes, scores, level = boxes[keep], scores[keep], level[keep]
-
+            #print('scores2',scores)
             keep = box_ops.batched_nms(boxes, scores, level, self.nms_thresh)
             keep = keep[:self.post_nms_top_n()]
 
             boxes, scores = boxes[keep], scores[keep]
-
+            #print('scores3',scores)
             final_boxes.append(boxes)
             final_scores.append(scores)
 
@@ -493,6 +491,7 @@ class RPNStructure(nn.Module):
         #print('feature maps',len(feature_maps),feature_maps[0].shape)
         
         objectness, pred_bbox_deltas = self.head(feature_maps)
+        #print('objectness',objectness[0].detach().cpu().numpy())
 
         image_shapes = [image.shape[-2:] for image in batch_of_images]
         image_list = ImageList(batch_of_images,image_shapes)
@@ -502,12 +501,13 @@ class RPNStructure(nn.Module):
         num_anchors_per_level = [o[0].numel() for o in objectness]
 
         objectness, pred_bbox_deltas = self.concat_box_prediction_layers(objectness,pred_bbox_deltas)
+        #print('objectness2',objectness[0].detach().cpu().numpy())
 
         proposals = self.box_coding.decode(pred_bbox_deltas.detach(),anchors)
         proposals = proposals.view(num_images_in_batch, -1, 4)
         
         final_boxes, final_scores = self.filter_proposals(proposals, objectness.detach(), num_anchors_per_level, image_shapes)
-        
+        #print('\nfinal scores',final_scores[0].cpu().numpy())
         losses = {}
         if self.training or (batch_of_anns is not None):
             if batch_of_anns is None:

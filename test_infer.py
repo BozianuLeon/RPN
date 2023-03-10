@@ -11,26 +11,22 @@ from model.rpn import SimpleRPN, SharedConvolutionalLayers, SharedConvLayersVGG,
 from utils.dataset import CustomCOCODataset, CustomCOCODataLoader
 
 
-
-dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/train2017",
-                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_train2017.json")
+dataset = CustomCOCODataset(root_folder="/home/users/b/bozianu/work/data/val2017",
+                            annotation_json="/home/users/b/bozianu/work/data/annotations/instances_val2017.json")
 print('Images in dataset:',len(dataset))
 
-train_size = int(0.1 * len(dataset))
-val_size = int(0.05 * len(dataset))
+train_size = int(0.5 * len(dataset))
+val_size = int(0.25 * len(dataset))
 test_size = len(dataset) - train_size - val_size
 print('\ttrain / val / test size : ',train_size,'/',val_size,'/',test_size)
-
-torch.random.manual_seed(1)
-train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,[train_size,val_size,test_size])
+#torch.random.manual_seed(1)
 
 #config
 batch_size = 32
 n_workers = 2
 bbone2rpn_channels = 64
 out_channels = 128
-sizes = ((16, 32, 64), ) 
-#sizes = ((32, ), (64, ), (128, )) #this config is for when multiple feature maps are passed - not the case for us
+sizes = ((16, 32, 64, 128), ) 
 aspect_ratios = ((0.5, 1.0, 2.0), )
 pre_nms_top_n = {"training": 1000, "testing": 400}
 post_nms_top_n = {"training": 100, "testing": 50}
@@ -43,15 +39,18 @@ positive_fraction = 0.5
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('\tbatch size: {}, num_workers: {}, device: {}'.format(batch_size,n_workers,device))
 
+train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,[train_size,val_size,test_size])
 train_init_dataloader = CustomCOCODataLoader(train_dataset,batch_size,num_workers=n_workers,shuffle=True,drop_last=True)
-val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=n_workers,shuffle=True,drop_last=True)
+val_init_dataloader = CustomCOCODataLoader(val_dataset,batch_size,num_workers=n_workers,shuffle=True,drop_last=False)
 train_dataloader = train_init_dataloader.loader()
 val_dataloader = val_init_dataloader.loader()
 
 
-#for a trained model to load in we must initialise anchor generator outside
-# with same parameters as before
-load_model_path = '/home/users/b/bozianu/work/logs/150159/model-20e.pth'
+# //////////////////////////////////// //////////////////////////////////// //////////////////////////////
+#for a trained model to load in we must initialise anchor generator outside with same parameters as before
+load_model_path = '/home/users/b/bozianu/work/logs/175557/model-20e.pth'
+# //////////////////////////////////// //////////////////////////////////// //////////////////////////////
+
 save_at = os.path.dirname(load_model_path)
 anchor_generator = torchvision.models.detection.anchor_utils.AnchorGenerator(sizes, aspect_ratios)
 num_anchors_per_cell = anchor_generator.num_anchors_per_location()[0]
@@ -61,7 +60,9 @@ loaded_model.eval()
 print('\tUsing trained model in eval mode from '+ load_model_path)
 
 
-rpn = RPNStructure(
+
+
+rpn_infer = RPNStructure(
     sizes=sizes,
     aspect_ratios=aspect_ratios,
     
@@ -87,54 +88,8 @@ rpn = RPNStructure(
 
 
 index,(img,truth) = next(enumerate(train_dataloader))
-rpn.eval()
-boxes1, scores1, losses1 = rpn(img)
-print(boxes1)
-print('length of boxes',len(boxes1))
-for i in range(len(img)):
-    boxes_pred = boxes1[i]
-    scores_pred = scores1[i]
-    print(len(boxes_pred))
-
-    fig,ax = plt.subplots()
-    for bbx in truth[i]["boxes"]:
-        x,y=float(bbx[0]),float(bbx[1])
-        w,h=float(bbx[2])-float(bbx[0]),float(bbx[3])-float(bbx[1])
-        
-        bb = matplotlib.patches.Rectangle((x,y),w,h,lw=2,ec='limegreen',fc='none')
-        ax.add_patch(bb)
-        
-    for boox, scoore in zip(boxes_pred,scores_pred):
-        print(boox,scoore)
-        x_pred,y_pred=float(boox[0]),float(boox[1])
-        w_pred,h_pred=float(boox[2])-float(boox[0]),float(boox[3])-float(boox[1])
-        
-        bb_pred = matplotlib.patches.Rectangle((x_pred,y_pred),w_pred,h_pred,lw=2,ec='red',fc='none')
-        ax.add_patch(bb_pred)
-        
-    image = torch.permute(img[i], (1, 2, 0))
-    ax.imshow(image)
-
-    if not os.path.exists(save_at+'/images/'):
-        os.makedirs(save_at+'/images/')
-
-    fig.savefig(save_at+'/images/infer_test{}.png'.format(str(i)))
-    plt.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+rpn_infer.eval()
+boxes1, scores1, losses1 = rpn_infer(img)
+print(scores1) #score threshold is killing us here!
 
 
