@@ -5,8 +5,10 @@ from torchvision import transforms
 
 import numpy as np
 import os
+import json
 from pycocotools.coco import COCO
 from PIL import Image
+import cv2
 
 
 class CustomCOCODataset(Dataset):
@@ -121,20 +123,17 @@ class CustomToyDataset(Dataset):
     def __getitem__(self, index):
         annotations_i = self.annotations[str(index)]
         path = annotations_i["image"]["img_path"]
-        img = Image.open(path).convert('L')
-        img.show()
-        print(img.mode)
+        img = cv2.imread(path,0).T #0 for grayscale, transpose for x-y flip
+        n_objs = annotations_i["anns"]["n_gausses"] #len(annotations_i["anns"]["bboxes"])
 
-        n_objs = annotations_i["annotations"]["n_gausses"]
-
-        tensor_boxes = torch.as_tensor(annotations_i["annotations"]["bboxes"])
+        tensor_boxes = torch.as_tensor(annotations_i["anns"]["bboxes"])
         boxes = self.xywh2xyxy(tensor_boxes)
         labels = torch.ones((n_objs,),dtype=torch.int32)
 
         img_tensor, scaled_boxes = self.prepare_image(img,boxes)
 
         my_annotations = {}
-        my_annotations["image_id"] = index
+        my_annotations["image_id"] = torch.tensor(index)
         my_annotations["path"] = path
         my_annotations["boxes"] = scaled_boxes
         my_annotations["labels"] = labels
@@ -156,11 +155,11 @@ class CustomToyDataset(Dataset):
     ):
         
         scaled_boxes = boxes
-        scaled_boxes[:,[0,2]] = (size[0]*(boxes[:,[0,2]]/img.size[0]))
-        scaled_boxes[:,[1,3]] = (size[1]*(boxes[:,[1,3]]/img.size[1]))   
+        scaled_boxes[:,[0,2]] = (size[0]*(boxes[:,[0,2]]/img.shape[0]))
+        scaled_boxes[:,[1,3]] = (size[1]*(boxes[:,[1,3]]/img.shape[1]))   
 
-        resize_tens = transforms.Compose([transforms.Resize(size),
-                                       transforms.ToTensor()])
+        resize_tens = transforms.Compose([transforms.ToTensor(),
+                                          transforms.Resize(size)])
         scaled_img = resize_tens(img)
         return scaled_img, scaled_boxes
 
